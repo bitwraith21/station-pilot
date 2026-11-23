@@ -1,3 +1,6 @@
+## Demo
+![Demo animation](assets/demo.gif)
+
 # Station Pilot
 
 Station Pilot is an independently implemented, offline radio playout workstation for Windows, macOS, and Linux. It plays regular audio files and uses a local browser profile for storage.
