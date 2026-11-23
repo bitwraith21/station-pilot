@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="$(var.ProductCode)" Name="Station Pilot"
+           Language="1033" Version="0.4.3" Manufacturer="Station Pilot"
+           UpgradeCode="{7EFBB32D-EAA0-4273-AEFC-2E03F5204393}">
+    <Package InstallerVersion="500" Platform="x64" Compressed="yes" InstallScope="perUser"
+             InstallPrivileges="limited" Description="Station Pilot radio playout" />
+    <MediaTemplate EmbedCab="yes"/>
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Station Pilot is already installed." />
+    <Property Id="PURGEDATA" Secure="yes" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Icon Id="StationPilotIcon" SourceFile="$(var.Source)\packaging\windows\StationPilot.ico" />
+    <Property Id="ARPPRODUCTICON" Value="StationPilotIcon" />
+    <Property Id="REBOOT" Value="ReallySuppress" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Station Pilot" />
+    <CustomAction Id="LaunchStationPilot" FileKey="LauncherExe" ExeCommand="" Return="asyncNoWait" />
+    <Binary Id="InstallerTasks" SourceFile="$(var.Bundle)\InstallerTasks.exe" />
+    <CustomAction Id="CloseRunningPilot" BinaryKey="InstallerTasks" ExeCommand="[UILevel]" Execute="firstSequence" Return="check" />
+    <UI>
+      <UIRef Id="WixUI_Common" />
+      <DialogRef Id="ExitDialog" />
+      <DialogRef Id="ProgressDlg" />
+      <Dialog Id="PilotWelcome" Width="370" Height="270" Title="Station Pilot Setup">
+        <Control Id="Title" Type="Text" X="24" Y="28" Width="322" Height="24"
+                 Text="Station Pilot Setup" />
+        <Control Id="Description" Type="Text" X="24" Y="66" Width="322" Height="45"
+                 Text="Click Install to install or update Station Pilot for your Windows account." />
+        <Control Id="Install" Type="PushButton" X="230" Y="242" Width="56" Height="17" Default="yes" Text="Install">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="302" Y="242" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit">1</Publish>
+        </Control>
+      </Dialog>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchStationPilot" Order="1">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="2">1</Publish>
+      <InstallUISequence>
+        <Show Dialog="PilotWelcome" Before="ProgressDlg">NOT Installed AND NOT RESUME</Show>
+        <Show Dialog="ProgressDlg" Before="ExecuteAction">NOT Installed</Show>
+        <Show Dialog="ExitDialog" OnExit="success">NOT Installed</Show>
+        <Custom Action="CloseRunningPilot" After="ProgressDlg">NOT UPGRADINGPRODUCTCODE</Custom>
+      </InstallUISequence>
+    </UI>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="StationPilotRoot" Name="StationPilot">
+          <Directory Id="AppDir" Name="App">
+            <Directory Id="FixedRuntime" Name="Runtime" />
+            <Component Id="LauncherFiles" Guid="{5B89F667-F9DA-42D6-9F7B-8402D919F66E}" Win64="no">
+              <File Id="LauncherExe" Source="$(var.Bundle)\StationPilot.exe" />
+              <File Id="WindowIcon" Source="$(var.Source)\packaging\windows\StationPilot.ico" />
+              <File Id="WebViewLoader" Source="$(var.Bundle)\WebView2Loader.dll" />
+              <File Id="RustNotices" Source="$(var.Bundle)\ThirdPartyNotices.txt" />
+              <RegistryValue Root="HKCU" Key="Software\Station Pilot" Name="Launcher" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="StationPilotMenu" Name="Station Pilot">
+          <Component Id="MenuItems" Guid="{ECB0C45F-1B31-484E-A1E1-D7F6268153BC}" Win64="no">
+            <Shortcut Id="OpenStationPilot" Name="Station Pilot" Target="[#LauncherExe]" WorkingDirectory="AppDir" Icon="StationPilotIcon" />
+            <Shortcut Id="UninstallStationPilot" Name="Uninstall Station Pilot" Target="[#LauncherExe]" Arguments="--uninstall" WorkingDirectory="AppDir" />
+            <RemoveFolder Id="RemoveShortcutFolder" On="uninstall" />
+            <RegistryValue Root="HKCU" Key="Software\Station Pilot" Name="Shortcuts" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="Complete" Title="Station Pilot" Level="1">
+      <ComponentRef Id="LauncherFiles"/>
+      <ComponentRef Id="MenuItems"/>
+      <?if $(var.Compact) = no ?>
+        <ComponentGroupRef Id="FixedWebViewFiles" />
+      <?endif?>
+    </Feature>
+
+    <Binary Id="CleanupLauncher" SourceFile="$(var.Bundle)\StationPilot.exe" />
+    <CustomAction Id="PurgeStationPilotData" BinaryKey="CleanupLauncher" ExeCommand="--purge"
+                  Execute="commit" Impersonate="yes" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="CloseRunningPilot" Before="InstallValidate">NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="PurgeStationPilotData" Before="InstallFinalize">Installed AND REMOVE="ALL" AND PURGEDATA="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Product>
+</Wix>

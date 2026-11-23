@@ -1,0 +1,34 @@
+{
+  "productName": "Station Pilot",
+  "identifier": "org.stationpilot.workstation",
+  "version": "0.4.3",
+  "build": {
+    "frontendDist": [
+      "../index.html",
+      "../app.js",
+      "../playout.js",
+      "../storage.js",
+      "../waveform.js",
+      "../library_links.js",
+      "../limiter.js",
+      "../covers.js",
+      "../style.css",
+      "../pilot_dsp.wasm",
+      "../icon.png"
+    ]
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "capabilities": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "../icon.png",
+      "../packaging/windows/StationPilot.ico",
+      "../packaging/unix/StationPilot.icns"
+    ]
+  }
+}

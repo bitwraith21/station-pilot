@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; media-src blob:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Station Pilot</title>
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="storage.js"></script>
+  <script defer src="playout.js"></script>
+  <script defer src="waveform.js"></script>
+  <script defer src="covers.js"></script>
+  <script defer src="library_links.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="mast">
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><h1>Station Pilot</h1></div>
+    <div class="mast-right"><span id="transport-state" class="status">STANDBY</span><time id="clock"></time><button id="processor">Processor</button><button id="settings">Output settings</button><button id="general-settings">Settings</button></div>
+  </header>
+  <main>
+    <section class="console" aria-label="Playout console">
+      <div class="waveforms" aria-label="Deck waveforms">
+        <div class="wave-lane"><span>A</span><canvas id="scope" role="img" aria-label="Deck A scrolling waveform"></canvas></div>
+        <div class="wave-lane"><span>B</span><canvas id="scope-b" role="img" aria-label="Deck B scrolling waveform"></canvas></div>
+      </div>
+      <article class="program" data-drop="A">
+        <div class="deck-head"><h2>Deck A</h2><span id="live-deck" class="tag">EMPTY</span></div>
+        <div class="track-display"><div><h3 id="live-title">Ready for playout</h3><p id="live-artist" class="sub">Add audio to the queue to begin.</p></div>
+          <div id="program-platter" class="platter" title="Drop a song to cue it. Drag the platter to scratch."><div class="disc"><img alt="" id="live-cover" draggable="false" hidden></div></div></div>
+      </article>
+        <article class="mixer"><div class="deck-head"><h2>Program output</h2><span id="output-mode" class="tag">STEREO</span></div>
+          <div class="meter-row"><span>L</span><div class="meter" id="meter-left"></div></div>
+          <div class="meter-row"><span>R</span><div class="meter" id="meter-right"></div></div>
+          <div class="scale" aria-hidden="true"><span>−60</span><span>−30</span><span>−12</span><span>0 dBFS</span></div>
+
+          <p id="limiter-active" class="sub" hidden>Peak limiter is reducing the output.</p>
+      </article>
+      <article class="standby" data-drop="B">
+        <div class="deck-head"><h2>Deck B</h2><span id="standby-deck" class="tag">EMPTY</span></div>
+        <div class="track-display"><div><h3 id="standby-title">Queue is empty</h3><p id="standby-artist" class="sub">Next track will appear here.</p></div>
+          <div id="standby-platter" class="platter" title="Drop a song to cue it. Drag the platter to scratch."><div class="disc"><img alt="" id="standby-cover" draggable="false" hidden></div></div></div>
+
+      </article>
+      <section class="control-strip" aria-label="Deck and output controls">
+        <div class="deck-controls">
+          <div class="deck-control"><span class="tag">A</span><button id="play-a" aria-label="Play Deck A" disabled>▶</button><button id="stop-a" aria-label="Stop Deck A" disabled>■</button>
+            <div class="position"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Deck A position" disabled><span id="remaining">−0:00</span></div>
+          </div>
+          <div class="deck-control"><span class="tag">B</span><button id="play-b" aria-label="Play Deck B" disabled>▶</button><button id="stop-b" aria-label="Stop Deck B" disabled>■</button>
+            <div class="position"><span id="elapsed-b">0:00</span><input id="seek-b" type="range" min="0" max="1" step="0.1" value="0" aria-label="Deck B position" disabled><span id="remaining-b">−0:00</span></div>
+          </div>
+        </div>
+        <div class="transport"><button id="play" class="primary" disabled>▶ Play</button><button id="stop" disabled>■ Stop</button><button id="next" disabled>⏭ Take next</button><label class="toggle"><input type="checkbox" id="auto"> Auto advance</label></div>
+        <div class="pitch-controls" aria-label="Active deck pitch and speed">
+          <label class="pitch-slider">Speed / pitch <input id="pitch" type="range" min="-16" max="16" step="0.1" value="0" disabled><output id="pitch-value">+0.0%</output></label>
+          <button id="pitch-reset" disabled>Reset</button><label class="toggle"><input id="key-lock" type="checkbox" checked> Key lock</label>
+          <label class="trim-label">Trim <input id="trim" type="number" min="-24" max="6" step="1" value="0" disabled> dB</label>
+        </div>
+        <label class="gain">Master <input id="gain" type="range" min="0" max="100" value="65"><output id="gain-value">65%</output></label>
+      </section>
+    </section>
+    <div class="workspace">
+      <section class="panel queue" aria-labelledby="queue-title" data-drop="queue">
+        <div class="panel-head"><h2 id="queue-title">Playout queue</h2><span id="queue-count" class="count">0 tracks</span></div>
+        <div class="batch-toolbar" aria-label="Queue batch actions"><button id="queue-select-all">Select all</button><button id="queue-deselect">Clear selection</button><button id="queue-remove-selected">Remove selected</button><button id="queue-clear">Clear queue</button><span id="queue-selection" class="count" aria-live="polite"></span></div>
+        <div class="list-wrap"><table><thead><tr><th class="selection-column"><span class="sr-only">Select</span></th><th>Track</th><th>Duration</th><th title="Estimated local start time assuming continuous playout">Est. start</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="queue"></tbody></table>
+          <p id="queue-empty" class="empty">Drop tracks or audio files here to queue them.</p></div>
+        <div class="panel-footer"><span>Drop a song on the queue to line it up, or on either deck to cue it.</span></div>
+      </section>
+      <section class="panel browser" aria-label="Media and automation">
+        <div class="panel-head tabs" aria-label="Media and automation views">
+          <button data-view="library" aria-pressed="true">Library</button><button data-view="folders" aria-pressed="false">Folders</button><button data-view="categories" aria-pressed="false">Categories</button><button data-view="schedule" aria-pressed="false">Schedule</button><button data-view="history" aria-pressed="false">History</button>
+        </div>
+        <div id="view-library" class="view" data-drop="library">
+          <div class="toolbar library-tools">
+            <input type="search" id="search" placeholder="Search title, artist, category" aria-label="Search library">
+            <div class="import-actions"><button id="import" class="primary">Link audio</button><button id="import-folder">Link folder</button></div>
+          </div>
+          <div class="batch-toolbar" aria-label="Library batch actions"><button id="library-select-all">Select matches</button><button id="library-deselect">Clear selection</button><button id="library-queue-selected">Queue selected</button><button id="library-remove-selected">Remove selected</button><span id="library-selection" class="count" aria-live="polite"></span></div>
+          <div class="list-wrap"><table><thead><tr><th class="selection-column"><span class="sr-only">Select</span></th><th>Track</th><th>Category</th><th>Time</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="library"></tbody></table>
+          <p id="library-empty" class="empty">Drop audio files or a folder here.</p>
+          <button id="more-tracks" hidden>Show more tracks</button></div>
+          <div class="panel-footer" id="library-count">0 tracks</div>
+        </div>
+        <div id="view-folders" class="view" hidden>
+          <div class="toolbar explorer-tools"><nav id="folder-path" aria-label="Folder path"></nav><label id="folder-depth" class="toggle" hidden><input id="include-subfolders" type="checkbox"> Include subfolders</label><button id="link-folder" class="primary">Link folder</button></div>
+          <div class="list-wrap"><table><thead><tr><th>Name</th><th>Details</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="folder-list"></tbody></table>
+          <p id="folder-empty" class="empty"></p></div>
+          <div class="panel-footer">Station Pilot plays tracks from the original folders.</div>
+        </div>
+        <div id="view-categories" class="view" hidden>
+          <div class="toolbar explorer-tools"><nav id="category-path" aria-label="Category path"></nav><button id="new-category" class="primary">New category</button></div>
+          <div class="list-wrap"><table><thead><tr><th>Name</th><th>Details</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="category-list"></tbody></table>
+          <p id="category-empty" class="empty"></p></div>
+          <div class="panel-footer">Right-click a track to assign a category.</div>
+        </div>
+        <div id="view-schedule" class="view" hidden>
+          <div class="toolbar"><label class="toggle"><input type="checkbox" id="scheduler"> Enable scheduled inserts</label><button id="add-event" class="primary">＋ Add event</button></div>
+          <div class="list-wrap"><table><thead><tr><th>Local time</th><th>Track</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody id="schedule"></tbody></table>
+          <p id="schedule-empty" class="empty">Schedule a station ID, promo, or other track.</p></div>
+          <div class="panel-footer">Due items move to the front of the queue. The current track finishes first.</div>
+        </div>
+        <div id="view-history" class="view" hidden>
+          <div class="toolbar"><span id="history-count">0 entries</span><button id="export">Export CSV</button></div>
+          <div class="list-wrap"><table><thead><tr><th>Local time</th><th>Track</th><th>Event</th><th>Deck</th><th>Position</th><th>Details</th></tr></thead><tbody id="history"></tbody></table>
+          <p id="history-empty" class="empty">Playout activity will appear here.</p></div>
+          <div class="panel-footer">Export CSV includes the full history.</div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="foot"><span id="message" role="status" aria-live="polite">Opening the local library…</span><span>Local workstation</span></footer>
+  <div id="row-menu" role="menu" aria-label="Track actions" hidden></div>
+  <dialog id="assign-category-dialog" aria-labelledby="assign-title"><form id="assign-category-form">
+    <h2 id="assign-title">Assign category</h2>
+    <p id="assign-summary" class="sub"></p>
+    <label>Category <select id="assign-category" class="category-picker" required autofocus><button type="button"><selectedcontent></selectedcontent></button></select></label>
+    <label hidden>New category <input class="new-category" maxlength="80" disabled></label>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Assign category</button></div>
+  </form></dialog>
+  <div id="toasts" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+  <aside id="donate-reminder" class="donate-reminder" aria-label="Support Station Pilot" hidden>
+    <a class="button-link kofi-link" data-donate href="https://ko-fi.com/bitwraith21" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a>
+    <button id="dismiss-donate" type="button" aria-label="Dismiss donation reminder">×</button>
+  </aside>
+
+  <dialog id="general-dialog" aria-labelledby="general-title"><form method="dialog">
+    <h2 id="general-title">Settings</h2>
+    <section class="settings-section" aria-labelledby="about-title">
+      <h3 id="about-title">About Station Pilot</h3>
+      <p class="sub">Version 0.4.3 · Local radio playout</p>
+      <p class="sub">Linked audio stays on its original drive. Your library information, queue, schedules, and settings stay in this workstation profile.</p>
+      <a class="button-link kofi-link" data-donate href="https://ko-fi.com/bitwraith21" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a>
+    </section>
+    <section class="settings-section" aria-labelledby="backup-title">
+      <h3 id="backup-title">Settings backup</h3>
+      <p class="sub">Back up your preferences, linked folders, and track details as JSON. Audio files stay in their original locations.</p>
+      <div class="device-tools"><button id="export-settings" type="button">Export JSON</button><button id="import-settings" type="button">Import JSON</button><button id="locate-music" type="button">Locate missing music</button></div>
+      <input id="settings-file" type="file" accept=".json,application/json" hidden>
+      <p id="settings-feedback" class="sub" role="status" hidden></p>
+    </section>
+    <div class="dialog-actions"><button id="general-output" type="button">Output settings</button><button class="primary">Done</button></div>
+  </form></dialog>
+  <dialog id="import-settings-dialog" aria-labelledby="import-settings-title"><form id="import-settings-form">
+    <h2 id="import-settings-title">Import settings?</h2>
+    <p class="sub" id="import-summary"></p>
+    <section class="track-preview" id="backup-track-preview" aria-label="Audio file preview" hidden>
+      <label>Search preview <input type="search" placeholder="Filename, title, or artist"></label>
+      <div class="list-wrap"><table><thead><tr><th>Original filename</th><th>Track title</th><th>Artist</th></tr></thead><tbody></tbody></table></div>
+      <div class="preview-pages"><button type="button" data-preview-previous>Previous</button><span data-preview-count role="status"></span><button type="button" data-preview-next>Next</button></div>
+    </section>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Apply settings</button></div>
+  </form></dialog>
+
+  <dialog id="music-preview-dialog" aria-labelledby="music-preview-title"><form id="music-preview-form">
+    <h2 id="music-preview-title">Review audio import</h2>
+    <p id="music-preview-status" class="sub" role="status"></p>
+    <section class="track-preview" id="music-preview" aria-label="Audio file preview" hidden>
+      <label>Filename order
+        <select id="music-filename-order">
+          <button type="button"><selectedcontent></selectedcontent></button>
+          <option value="title-artist">Title - Artist</option>
+          <option value="artist-title">Artist - Title</option>
+        </select>
+      </label>
+      <label>Search preview <input type="search" placeholder="Filename, title, or artist"></label>
+      <div class="list-wrap"><table><thead><tr><th>Original filename</th><th>Track title</th><th>Artist</th></tr></thead><tbody></tbody></table></div>
+      <div class="preview-pages"><button type="button" data-preview-previous>Previous</button><span data-preview-count role="status"></span><button type="button" data-preview-next>Next</button></div>
+    </section>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button id="music-preview-confirm" class="primary" disabled>Link audio</button></div>
+  </form></dialog>
+
+  <dialog id="missing-music-dialog" aria-labelledby="missing-music-heading"><form method="dialog">
+    <h2 id="missing-music-heading">Locate missing music</h2>
+    <p class="sub" id="missing-music-status" role="status"></p>
+    <div class="list-wrap" id="missing-music-list"><table><tbody id="missing-music"></tbody></table></div>
+    <div class="dialog-actions"><button class="primary">Done</button></div>
+  </form></dialog>
+
+  <dialog id="reconnect-dialog" aria-labelledby="reconnect-heading"><form method="dialog">
+    <h2 id="reconnect-heading">Reconnect music</h2><p id="reconnect-detail"></p>
+    <p class="sub">Choose the original location to restore read access. Your audio stays on its drive.</p>
+    <p id="reconnect-status" role="status"></p>
+    <div class="dialog-actions"><button value="cancel">Cancel</button><button id="reconnect-choose" type="button" class="primary">Choose location</button></div>
+  </form></dialog>
+  <dialog id="track-dialog"><form id="track-form">
+    <h2>Edit track</h2><label>Title <input name="title" required maxlength="160"></label>
+    <label>Artist <input name="artist" maxlength="160"></label><label>Category <select name="category" class="category-picker"><button type="button"><selectedcontent></selectedcontent></button></select></label>
+    <label hidden>New category <input class="new-category" maxlength="80" disabled></label>
+    <label class="toggle"><input type="checkbox" name="rotation"> Include in fallback rotation</label>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save track</button></div>
+  </form></dialog>
+  <dialog id="event-dialog" aria-labelledby="event-title"><form id="event-form">
+    <h2 id="event-title">Scheduled insert</h2>
+    <label>Search tracks <input id="event-search" type="search" placeholder="Title or artist" autocomplete="off" aria-controls="event-track" autofocus></label>
+    <label>Track <select name="track" id="event-track" aria-label="Track" required><button type="button"><selectedcontent></selectedcontent></button></select></label>
+    <p id="event-matches" class="sub" role="status" hidden></p>
+    <label>Repeat <select name="repeat" aria-label="Repeat"><button type="button"><selectedcontent></selectedcontent></button><option value="once">Once</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
+    <label id="weekly-field" hidden>Day of week <select name="weekday" disabled><button type="button"><selectedcontent></selectedcontent></button></select></label>
+    <label id="yearly-field" hidden>Month <select name="month" disabled><button type="button"><selectedcontent></selectedcontent></button></select></label>
+    <label id="month-day-field" hidden>Day of month <input name="monthDay" type="number" min="1" max="31" step="1" disabled></label>
+    <p id="short-month-note" class="sub" hidden>Dates that do not occur are skipped.</p>
+    <label id="repeat-time-field">Local time <input name="time" type="time" required></label>
+    <label id="once-field" hidden>Local date and time <input name="date" type="datetime-local"></label>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button id="event-submit" class="primary">Save event</button></div>
+  </form></dialog>
+  <dialog id="settings-dialog"><form id="settings-form">
+    <h2>Output settings</h2>
+    <label>Audio output device <select name="sink" aria-label="Audio output device"><button type="button"><selectedcontent></selectedcontent></button><option value="">System default</option></select></label>
+    <div class="device-tools"><button id="refresh-outputs" type="button">Refresh outputs</button><button id="choose-output" type="button" hidden>Choose device</button><button id="windows-volume-mixer" type="button" hidden>Windows Volume Mixer</button></div>
+    <p id="output-help" class="sub" role="status"></p>
+    <label>Program channels <select name="output"><button type="button"><selectedcontent></selectedcontent></button><option value="stereo">Stereo</option><option value="mono">Mono (dual mono)</option></select></label>
+    <label>Transition overlap (seconds) <input name="fade" type="number" min="0" max="12" step="0.5" required></label>
+    <label class="toggle"><input type="checkbox" name="rotation"> Use fallback rotation when the queue runs out</label>
+    <label class="toggle"><input type="checkbox" name="artwork"> Show embedded cover art</label>
+    <label class="toggle"><input type="checkbox" name="rotateArtwork"> Rotate the program platter</label>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save settings</button></div>
+  </form></dialog>
+  <dialog id="processor-dialog"><form id="processor-form">
+    <h2>Program audio processor</h2>
+    <div class="processor-options">
+      <label>Preset <select id="processor-preset" aria-label="Preset"><button type="button"><selectedcontent></selectedcontent></button><option value="">Custom</option></select></label>
+      <label class="toggle"><input type="checkbox" name="enabled"> Enable processor</label>
+    </div>
+    <div class="processor-fields">
+      <label><span>High-pass (Hz) <output data-processor-value="highpass"></output></span><input name="highpass" aria-label="High-pass (Hz)" type="range" min="20" max="200" step="1"></label>
+      <label><span>Low EQ (dB) <output data-processor-value="low"></output></span><input name="low" aria-label="Low EQ (dB)" type="range" min="-12" max="12" step="0.5"></label>
+      <label><span>Mid EQ (dB) <output data-processor-value="mid"></output></span><input name="mid" aria-label="Mid EQ (dB)" type="range" min="-12" max="12" step="0.5"></label>
+      <label><span>High EQ (dB) <output data-processor-value="high"></output></span><input name="high" aria-label="High EQ (dB)" type="range" min="-12" max="12" step="0.5"></label>
+      <label><span>Threshold (dBFS) <output data-processor-value="threshold"></output></span><input name="threshold" aria-label="Threshold (dBFS)" type="range" min="-60" max="0" step="1"></label>
+      <label><span>Ratio <output data-processor-value="ratio"></output></span><input name="ratio" aria-label="Ratio" type="range" min="1" max="20" step="0.1"></label>
+      <label><span>Attack (ms) <output data-processor-value="attack"></output></span><input name="attack" aria-label="Attack (ms)" type="range" min="1" max="250" step="1"></label>
+      <label><span>Release (ms) <output data-processor-value="release"></output></span><input name="release" aria-label="Release (ms)" type="range" min="20" max="1000" step="1"></label>
+      <label><span>Makeup gain (dB) <output data-processor-value="makeup"></output></span><input name="makeup" aria-label="Makeup gain (dB)" type="range" min="-12" max="12" step="0.5"></label>
+    </div>
+    <div class="dialog-actions"><button id="processor-reset" type="button">Reset</button><button type="button" data-close>Cancel</button><button class="primary">Apply processor</button></div>
+  </form></dialog>
+  <dialog id="remove-dialog" aria-labelledby="remove-title"><form id="remove-form">
+    <h2 id="remove-title">Remove track</h2><p id="remove-name"></p><p id="remove-detail" class="sub"></p>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button id="remove-submit" class="danger">Remove track</button></div>
+  </form></dialog>
+  <dialog id="clear-queue-dialog" aria-labelledby="clear-queue-title"><form id="clear-queue-form">
+    <h2 id="clear-queue-title">Clear the playout queue?</h2>
+    <p class="sub">Queued tracks will be removed. The playing or loading track, library, and scheduled events stay in place.</p>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="danger">Clear queue</button></div>
+  </form></dialog>
+  <dialog id="category-dialog" aria-labelledby="category-heading"><form id="category-form">
+    <h2 id="category-heading">New category</h2>
+    <label>Name <input name="categoryName" required maxlength="80"></label>
+    <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Create category</button></div>
+  </form></dialog>
+</body>
+</html>

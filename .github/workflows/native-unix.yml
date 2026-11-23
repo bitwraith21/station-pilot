@@ -1,0 +1,50 @@
+name: Native Unix packages
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: Linux-x64
+          - runner: macos-15-intel
+            platform: macOS-x64
+          - runner: macos-15
+            platform: macOS-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - run: rustup update stable
+      - run: cargo +stable build --release --locked --manifest-path rust/Cargo.toml
+      - name: Package native workstation
+        run: python3 packaging/build-unix.py Station-Pilot-${{ matrix.platform }}.tar.gz --native-host rust/target/release/station-pilot
+      - name: Exercise installer and data retention
+        shell: bash
+        run: |
+          export HOME="$(mktemp -d)" XDG_DATA_HOME=""
+          archive=$(ls Station-Pilot-*.tar.gz)
+          tar -xzf "$archive" -C "$HOME"
+          cd "$HOME/Station-Pilot"
+          sh install.sh
+          sh uninstall.sh --keep-data
+          sh install.sh
+          sh uninstall.sh --remove-data
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Station-Pilot-${{ matrix.platform }}
+          path: Station-Pilot-*.tar.gz
