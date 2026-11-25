@@ -9,7 +9,8 @@ Station Pilot is an independently implemented, offline radio playout workstation
 ## Demo on OBS Studio custom dock
 ![Demo animation](assets/demo-on-obs.gif)
 
-
+# Support the project
+[<img src="assets/kofi6.webp" alt="Support this project" width="200">](https://ko-fi.com/bitwraith21)
 
 ## Install the desktop app
 
