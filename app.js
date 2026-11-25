@@ -245,7 +245,7 @@ function refreshDurations() {
 }
 
 function scanDurations() {
-  if (durationScanPending) return;
+  if (dockShared || durationScanPending) return;
   durationScanPending = true;
   setTimeout(() => {
     durationScanPending = false;
@@ -318,9 +318,11 @@ function showRowMenu(event, row, list, id, keyboard = false) {
     if (list !== "queue") add("Add to queue", () => {
       for (const key of ids) enqueue(tracks.get(key));
     }, track.missing);
-    add(ids.length > 1 ? "Assign category to " + ids.length + " tracks…" : "Assign category…", () => openCategoryAssignment(ids));
-    add("Edit track…", () => editTrack(track));
-    if (track.missing) add("Locate file…", () => promptReconnect(track, null));
+    if (!dockShared) {
+      add(ids.length > 1 ? "Assign category to " + ids.length + " tracks…" : "Assign category…", () => openCategoryAssignment(ids));
+      add("Edit track…", () => editTrack(track));
+      if (track.missing) add("Locate file…", () => promptReconnect(track, null));
+    }
     for (const deck of ["A", "B"]) {
       add("Cue on Deck " + deck, () => cueDropped(deck, item || newEntry(track)), track.missing || item?.id === pendingId() && Boolean(item));
     }
@@ -470,6 +472,7 @@ function updateSelection(list) {
   } else {
     $("library-select-all").disabled = !libraryMatches.length;
     $("library-queue-selected").disabled = count === 0;
+    if (dockShared) $("library-remove-selected").disabled = true;
   }
 }
 
@@ -551,10 +554,12 @@ function drawLibrary() {
     durationCell(row, track);
     const td = cell(row, "");
     action(td, "＋ Queue", () => enqueue(track), "Queue " + track.title);
-    action(td, "Edit", () => editTrack(track), "Edit " + track.title);
-    if (track.missing) action(td, "Locate", () => promptReconnect(track, null), "Locate " + track.title);
-    else if (track.source?.handle) action(td, "Access", () => promptReconnect(track), "Reconnect " + track.title);
-    action(td, "×", () => confirmRemove(track), "Remove " + track.title + " from library");
+    if (!dockShared) {
+      action(td, "Edit", () => editTrack(track), "Edit " + track.title);
+      if (track.missing) action(td, "Locate", () => promptReconnect(track, null), "Locate " + track.title);
+      else if (track.source?.handle) action(td, "Access", () => promptReconnect(track), "Reconnect " + track.title);
+      action(td, "×", () => confirmRemove(track), "Remove " + track.title + " from library");
+    }
   }
   $("library-empty").hidden = matches.length !== 0;
   $("library-empty").textContent = query ? "No matching tracks." : "Link files or a folder to begin.";
@@ -665,6 +670,7 @@ function bindDrop() {
       }
       return;
     }
+    if (dockShared) return notify("Link music in the Station Pilot desktop app.", true);
     const targetDeck = ["A", "B"].includes(list) ? list : null;
     const droppedFiles = Array.from(event.dataTransfer.files);
     const tasks = Array.from(event.dataTransfer.items).filter(item => item.kind === "file")
@@ -1314,6 +1320,8 @@ function bind() {
   $("more-tracks").addEventListener("click", () => { libraryLimit += 150; drawLibrary(); });
   bindLinkedLibrary();
   bindGeneralSettings();
+  bindDockDesktop();
+  bindDockView();
   bindSettingsBackup();
   syncSettingsControls();
   $("play").addEventListener("click", () => engine.toggle());
@@ -1539,8 +1547,9 @@ function bind() {
   $("export").addEventListener("click", exportHistory);
 }
 
-async function start() {
-  store = await LocalStore.open();
+async function start(snapshot = null) {
+  const profile = !dockPath ? undefined : dockShared ? "station-pilot-obs-shared" : "station-pilot-obs-separate";
+  store = await LocalStore.open(profile);
   const [saved, library, history, folders] = await Promise.all([
     store.read("state", "workstation"), store.read("tracks"), store.recentHistory(200), store.read("folders")
   ]);
@@ -1556,8 +1565,11 @@ async function start() {
   state.categories = Array.isArray(state.categories) ? state.categories : [];
   state.settings = { ...initialState.settings, ...state.settings };
   state.settings.processor = { ...PROCESSOR_DEFAULTS, ...state.settings.processor };
-  state.queue = state.queue.filter(item => item.stop || tracks.has(item.trackId));
-  state.events = state.events.filter(item => tracks.has(item.trackId));
+  if (snapshot) applyDockProfile(snapshot);
+  if (!dockShared) {
+    state.queue = state.queue.filter(item => item.stop || tracks.has(item.trackId));
+    state.events = state.events.filter(item => tracks.has(item.trackId));
+  }
   const lastRotation = history.find(row => row.event === "Started" && row.source === "Rotation");
   nextRotation = lastRotation ? lastRotation.trackId : null;
   recent = history;
@@ -1607,7 +1619,17 @@ async function start() {
   else window.chrome?.webview?.postMessage("pilot-ready");
 }
 
-if (window.stationPilotUnix && window.crypto?.getRandomValues) {
+if (dockPath) {
+  initializeDock().then(snapshot => {
+    if (!navigator.locks) return start(snapshot);
+    return navigator.locks.request("station-pilot-obs", { ifAvailable: true }, async lock => {
+      if (!lock) return note("Station Pilot is already open in another dock using this URL.", true);
+      await start(snapshot);
+      await new Promise(() => {});
+    });
+  }).catch(error => note(error.message, true));
+} else if (window.stationPilotUnix && window.crypto?.getRandomValues) {
+  navigator.locks?.request("station-pilot-desktop-playout", () => new Promise(() => {})).catch(() => {});
   start().catch(storageError);
 } else if (!navigator.locks || !window.crypto || !crypto.randomUUID) {
   note("Open Station Pilot from its loopback URL in a current Chrome, Edge, Firefox, or Safari browser.", true);

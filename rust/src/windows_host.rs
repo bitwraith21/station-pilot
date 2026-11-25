@@ -37,9 +37,9 @@ use windows::{
 
 const ORIGIN: &str = "http://127.0.0.1:8765/";
 #[cfg(not(feature = "offline"))]
-const PRODUCT: &str = "{0767ECC3-2A07-4BA3-8B49-EC7C73A17754}";
+const PRODUCT: &str = "{074DC957-69CE-49CF-9387-A3AE73F78379}";
 #[cfg(feature = "offline")]
-const PRODUCT: &str = "{943B5973-5D26-4275-BBE4-F4679075C3A8}";
+const PRODUCT: &str = "{FE1E8D43-6D12-4156-B7B2-8BEF88FD5B08}";
 
 use crate::ASSETS;
 
@@ -234,7 +234,7 @@ fn save_settings_export(owner: HWND, request: SettingsExport) -> Result<bool> {
     Ok(true)
 }
 
-fn pick_media(owner: HWND, folders: bool) -> windows::core::Result<Vec<HSTRING>> {
+pub(crate) fn pick_media(owner: HWND, folders: bool) -> windows::core::Result<Vec<HSTRING>> {
     unsafe {
         let picker: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
         let flags = picker.GetOptions()? | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR;
@@ -438,9 +438,10 @@ fn run() -> Result<()> {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External("about:blank".parse()?))
                 .title("Station Pilot").inner_size(1280.0, 850.0).min_inner_size(560.0, 480.0)
                 .data_directory(profile).disable_drag_drop_handler()
-                .additional_browser_args("--disable-background-networking --disk-cache-size=16777216 --autoplay-policy=no-user-gesture-required")
+                .additional_browser_args("--disable-background-networking --disable-background-timer-throttling --disable-renderer-backgrounding --disk-cache-size=16777216 --autoplay-policy=no-user-gesture-required")
                 .on_navigation(|url| url.as_str() == ORIGIN || url.as_str() == "about:blank")
                 .build()?;
+            let dock = crate::dock::Dock::attach(&window, data.clone())?;
             let owner = window.hwnd()?.0 as usize;
             let window_copy = window.clone();
             window.with_webview(move |platform| {
@@ -460,6 +461,18 @@ fn run() -> Result<()> {
                         if args.TryGetWebMessageAsString(&mut raw).is_err() { return Ok(()) }
                         let body = webview2_com::take_pwstr(raw);
                         match body.as_str() {
+                            value if value.starts_with("dock:") => {
+                                #[derive(serde::Deserialize)]
+                                struct DockMessage { id: String, request: crate::dock::Command }
+                                if let Ok(message) = serde_json::from_str::<DockMessage>(&value[5..]) {
+                                    let result = dock.execute(message.request);
+                                    let response = match result {
+                                        Ok(value) => serde_json::json!({"type":"pilot-dock","id":message.id,"value":value}),
+                                        Err(error) => serde_json::json!({"type":"pilot-dock","id":message.id,"error":error}),
+                                    };
+                                    picker.PostWebMessageAsJson(&HSTRING::from(response.to_string()))?;
+                                }
+                            }
                             "pilot-ready" => picker.PostWebMessageAsJson(w!(r#"{"type":"pilot-picker-ready"}"#))?,
                             "pick-folder" | "pick-audio" => {
                                 let folders = body == "pick-folder";
@@ -521,6 +534,7 @@ fn run() -> Result<()> {
                     break;
                 }
                 if unsafe { WaitForSingleObject(HANDLE(show_handle as *mut _), 0) } == WAIT_OBJECT_0 {
+                    let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }

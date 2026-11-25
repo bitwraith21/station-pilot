@@ -1,9 +1,9 @@
 "use strict";
 
 class LocalStore {
-  static open() {
+  static open(name = "station-pilot") {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("station-pilot", 2);
+      const request = indexedDB.open(name, 2);
       request.onupgradeneeded = event => {
         if (event.oldVersion === 0) {
           request.result.createObjectStore("state");
@@ -51,7 +51,10 @@ class LocalStore {
   write(stores, operation) {
     return new Promise((resolve, reject) => {
       const transaction = this.database.transaction(stores, "readwrite");
-      transaction.oncomplete = () => resolve();
+      transaction.oncomplete = () => {
+        resolve();
+        if (stores.some(name => ["state", "tracks", "folders"].includes(name))) publishDockLibrary();
+      };
       transaction.onabort = () => reject(transaction.error || new Error("Storage transaction aborted."));
       try {
         operation(transaction);
@@ -90,7 +93,7 @@ class LocalStore {
       if (!directory) throw new DOMException("The music location is missing.", "NotFoundError");
       const segments = track.source.path;
       if (directory.nativeLink) {
-        return await unixHandle({ ...directory.nativeLink, parts: segments, kind: "file", name: track.fileName, modified: track.modified }).getFile();
+        return await unixHandle({ ...directory.nativeLink, parts: [...directory.nativeLink.parts, ...segments], kind: "file", name: track.fileName, modified: track.modified }).getFile();
       }
       for (const name of segments.slice(0, -1)) directory = await directory.getDirectoryHandle(name);
       const file = await directory.getFileHandle(segments.at(-1));

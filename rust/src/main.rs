@@ -5,10 +5,12 @@ mod windows_host;
 #[cfg(unix)]
 mod unix_host;
 
-#[cfg(windows)]
+mod dock;
+
 const ASSETS: &[(&str, &str, &[u8])] = &[
     ("index.html", "text/html", include_bytes!("../../index.html")),
     ("style.css", "text/css", include_bytes!("../../style.css")),
+    ("dock.js", "text/javascript", include_bytes!("../../dock.js")),
     ("app.js", "text/javascript", include_bytes!("../../app.js")),
     ("playout.js", "text/javascript", include_bytes!("../../playout.js")),
     ("storage.js", "text/javascript", include_bytes!("../../storage.js")),

@@ -6,7 +6,7 @@ let currentCategory = null;
 let linkJobs = Promise.resolve();
 const desktopInvoke = (command, args) => window.__TAURI_INTERNALS__.invoke(command, args);
 const windowsBridge = window.chrome?.webview;
-let nativePickerReady = Boolean(window.stationPilotUnix);
+let nativePickerReady = Boolean(window.stationPilotUnix || dockPath);
 
 function workstationId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -24,11 +24,12 @@ function unixHandle(link) {
     async isSameEntry(other) { return other?.nativeLink?.key === link.key && JSON.stringify(other.nativeLink.parts) === JSON.stringify(link.parts); },
     async queryPermission() { return "granted"; },
     async *values() {
-      for (const child of await desktopInvoke("list_children", args)) yield unixHandle(child);
+      const children = dockPath ? await dockFetch("children", args) : await desktopInvoke("list_children", args);
+      for (const child of children) yield unixHandle(child);
     },
     async getFile() {
       try {
-        const bytes = await desktopInvoke("read_music", args);
+        const bytes = dockPath ? await dockFetch("audio", args) : await desktopInvoke("read_music", args);
         const mime = { mp3: "audio/mpeg", flac: "audio/flac", wav: "audio/wav", ogg: "audio/ogg", opus: "audio/ogg", m4a: "audio/mp4", aac: "audio/aac", aiff: "audio/aiff" };
         return new File([new Uint8Array(bytes)], link.name, { lastModified: link.modified, type: mime[link.name.split(".").pop().toLowerCase()] || "" });
       } catch (error) { throw new DOMException(String(error), "NotFoundError"); }
@@ -170,7 +171,7 @@ function explorerTrack(parent, track) {
   bindRowMenu(row, "explorer", track.id);
   const options = cell(row, "");
   action(options, "＋ Queue", () => enqueue(track), "Queue " + track.title).disabled = Boolean(track.missing);
-  action(options, "Edit", () => editTrack(track), "Edit " + track.title);
+  if (!dockShared) action(options, "Edit", () => editTrack(track), "Edit " + track.title);
 }
 
 function drawFolders() {
@@ -188,9 +189,11 @@ function drawFolders() {
       const count = item.count || 0;
       cell(row, count + (count === 1 ? " track" : " tracks") + (item.missing ? " · Missing" : ""));
       const options = cell(row, "");
-      action(options, "Refresh", () => refreshFolder(item), "Refresh " + item.name);
-      if (item.missing) action(options, "Locate folder", () => promptReconnect(null, item), "Locate folder " + item.name);
-      else action(options, "Relink", () => pickFolder(item), "Relink " + item.name);
+      if (!dockShared) {
+        action(options, "Refresh", () => refreshFolder(item), "Refresh " + item.name);
+        if (item.missing) action(options, "Locate folder", () => promptReconnect(null, item), "Locate folder " + item.name);
+        else action(options, "Relink", () => pickFolder(item), "Relink " + item.name);
+      }
     }
   } else {
     folderNavigation(nav, folder.name, () => showFolder(folder.id));
@@ -665,6 +668,7 @@ async function pickAudio() {
 }
 
 function pickNativeAudio(action) {
+  if (dockPath) return dockFetch("pick", { folder: action === "pick-folder" }).then(links => links.map(unixHandle));
   if (window.stationPilotUnix) return desktopInvoke("pick_sources", { folder: action === "pick-folder" }).then(links => links.map(unixHandle));
   if (nativePickerResult) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
@@ -684,6 +688,7 @@ async function refreshFolder(folder) {
 }
 
 function promptReconnect(track, folder = store.folders.get(track?.source?.folderId)) {
+  if (dockShared) return notify("Reconnect this music in the Station Pilot desktop app.", true);
   if ($("reconnect-dialog").open) return;
   reconnectSource = { track, folder };
   $("reconnect-detail").textContent = folder ? "Station Pilot needs access to “" + folder.name + "” and its subfolders."
@@ -739,7 +744,7 @@ function saveAudioDuration(track, duration) {
   if (!current || current.duration === duration) return;
   current.duration = duration;
   track.duration = duration;
-  store.updateTrack(current).catch(storageError);
+  if (!dockShared) store.updateTrack(current).catch(storageError);
   refreshDurations();
 }
 
@@ -754,7 +759,7 @@ function exportLinkedLibrary() {
   const files = [...tracks.values()].filter(track => track.source).map(track => {
     const { id, title, artist, category, rotation, duration, fileName, size, modified, source, namesEdited, nameOrder } = track;
     const location = source.folderId ? { folderId: source.folderId, path: source.path } : backupBookmark(source);
-    return { id, title, artist, category, rotation, duration, fileName, size, modified, source: location, namesEdited, nameOrder };
+    return { id, title, artist, category, rotation, duration: duration ?? null, fileName, size, modified, source: location, namesEdited, nameOrder };
   });
   return { folders, files, categories: categories() };
 }
@@ -813,7 +818,7 @@ function readLinkedLibrary(library) {
 
 async function importedHandle(bookmark, current, kind, name, currentName = name) {
   const saved = { nativeKey: bookmark.nativeKey };
-  if (window.stationPilotUnix && bookmark.nativeLink) saved.handle = { nativeLink: { ...bookmark.nativeLink, kind, name } };
+  if ((window.stationPilotUnix || dockPath) && bookmark.nativeLink) saved.handle = { nativeLink: { ...bookmark.nativeLink, kind, name } };
   for (const source of [current, saved]) {
     try {
       const handle = await sourceHandle(source);
@@ -853,7 +858,9 @@ async function prepareImportedLibrary(library) {
     const handle = await importedHandle(track.source, existing?.source, "file", track.fileName, existing?.fileName);
     try {
       if (!handle) throw new Error("File unavailable.");
-      const file = handle.nativeLink ? await desktopInvoke("inspect_link", handle.nativeLink) : await handle.getFile();
+      const file = handle.nativeLink
+        ? (dockPath ? await dockFetch("stat", handle.nativeLink) : await desktopInvoke("inspect_link", handle.nativeLink))
+        : await handle.getFile();
       if (file.name !== handle.name || file.size !== track.size) throw new Error("File changed.");
       files.push({ ...track, fileName: file.name, modified: file.lastModified ?? file.modified, source: { handle: storedHandle(handle), nativeKey: nativeKeys.get(handle) }, missing: false });
     } catch {

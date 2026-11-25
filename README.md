@@ -1,9 +1,15 @@
-## Demo
-![Demo animation](assets/demo.gif)
 
 # Station Pilot
 
-Station Pilot is an independently implemented, offline radio playout workstation for Windows, macOS, and Linux. It plays regular audio files and uses a local browser profile for storage.
+Station Pilot is an independently implemented, offline radio playout workstation for Windows, macOS, and Linux. It plays regular audio files and uses a local browser profile for storage, you can integrate it on OBS for direct playout.
+
+## App Demo
+![Demo animation](assets/demo.gif)
+
+## Demo on OBS Studio custom dock
+![Demo animation](assets/demo-on-obs.gif)
+
+
 
 ## Install the desktop app
 
@@ -42,6 +48,14 @@ Saved data includes file and folder links, metadata, queue, schedules, settings,
 The Tauri app runs without a local HTTP server on all three systems. On macOS, WKWebView also stores the workstation database inside the app’s WebKit profile. When upgrading a Linux or macOS installation from the Chromium launcher, export settings in the old app first, then import them and relink music in the new app. Its library, queue, schedules, and history start in a separate WebKit profile.
 
 For scripted removal on macOS or Linux, use `sh uninstall.sh --keep-data` or `sh uninstall.sh --remove-data`.
+
+## OBS custom browser dock
+
+Open **Settings → OBS Dock**, enable the local dock URL, and leave **Local port** blank to select a free port automatically. For a specific port, use **Check port** and then apply the settings. Copy the full URL into **OBS → Docks → Custom Browser Docks** on the same computer.
+
+Turn on **Share this app’s settings and linked music** to mirror the desktop library and preferences. Manage shared settings and links in the desktop app. Older browser-only links may need to be relinked with the desktop picker. The dock keeps its own queue, schedules, and playback history, and uses the browser’s default output device in shared mode. With sharing off, the dock has independent settings and links. Its browser profile is tied to the port, so keep the same port to reopen that profile.
+
+Choose **Keep running in the system tray** or **Ask every time** to keep the server available when closing the window. The tray menu can show or quit Station Pilot. Quitting shuts down the dock server. Tray availability on Linux depends on the desktop environment.
 
 ## Run from source
 

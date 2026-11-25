@@ -1,10 +1,11 @@
 {
   "productName": "Station Pilot",
   "identifier": "org.stationpilot.workstation",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "build": {
     "frontendDist": [
       "../index.html",
+      "../dock.js",
       "../app.js",
       "../playout.js",
       "../storage.js",

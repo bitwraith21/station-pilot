@@ -239,13 +239,16 @@ pub fn main() {
         .write(true)
         .open(data.join(".workstation.lock"))
         .expect("Could not open workstation lock");
+    let reopen = data.join(".show-workstation");
     if lock.try_lock().is_err() {
+        let _ = fs::write(&reopen, b"");
         return;
     }
+    let _ = fs::remove_file(&reopen);
     let bookmarks = data.join("MusicLinks");
     tauri::Builder::default()
         .manage(Library::open(bookmarks).expect("Could not open music links"))
-        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate])
+        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate,crate::dock::dock_command])
         .setup(move |app| {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Station Pilot").inner_size(1280.0,850.0).min_inner_size(560.0,480.0)
@@ -253,7 +256,18 @@ pub fn main() {
                 .on_navigation(|url| url.scheme()=="tauri" && url.host_str()==Some("localhost"));
             #[cfg(target_os="linux")]
             let builder = builder.data_directory(data.join("WebKit"));
+            #[cfg(target_os="macos")]
+            let builder = builder.background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
             let window = builder.build()?;
+            app.manage(crate::dock::Dock::attach(&window, data.clone())?);
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if fs::remove_file(&reopen).is_ok() {
+                    let handle = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || crate::dock::show(&handle));
+                }
+            });
             let target = window.clone();
             window.on_window_event(move |event| {
                 if let WindowEvent::DragDrop(DragDropEvent::Drop {paths,position,..}) = event {
@@ -265,5 +279,11 @@ pub fn main() {
                 }
             });
             Ok(())
-        }).run(tauri::generate_context!()).expect("Station Pilot could not start");
+        }).build(tauri::generate_context!()).expect("Station Pilot could not start")
+        .run(|_app, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+                crate::dock::show(_app);
+            }
+        });
 }

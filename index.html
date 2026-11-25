@@ -11,6 +11,7 @@
   <script defer src="playout.js"></script>
   <script defer src="waveform.js"></script>
   <script defer src="covers.js"></script>
+  <script defer src="dock.js"></script>
   <script defer src="library_links.js"></script>
   <script defer src="app.js"></script>
 </head>
@@ -111,7 +112,7 @@
       </section>
     </div>
   </main>
-  <footer class="foot"><span id="message" role="status" aria-live="polite">Opening the local library…</span><span>Local workstation</span></footer>
+  <footer class="foot"><span id="message" role="status" aria-live="polite">Opening the local library…</span><span id="dock-indicator">Local workstation</span></footer>
   <div id="row-menu" role="menu" aria-label="Track actions" hidden></div>
   <dialog id="assign-category-dialog" aria-labelledby="assign-title"><form id="assign-category-form">
     <h2 id="assign-title">Assign category</h2>
@@ -130,9 +131,26 @@
     <h2 id="general-title">Settings</h2>
     <section class="settings-section" aria-labelledby="about-title">
       <h3 id="about-title">About Station Pilot</h3>
-      <p class="sub">Version 0.4.3 · Local radio playout</p>
+      <p class="sub">Version 0.4.4 · Local radio playout</p>
       <p class="sub">Linked audio stays on its original drive. Your library information, queue, schedules, and settings stay in this workstation profile.</p>
       <a class="button-link kofi-link" data-donate href="https://ko-fi.com/bitwraith21" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a>
+    </section>
+    <p id="dock-profile-note" class="sub" hidden></p>
+    <section id="dock-section" class="settings-section" aria-labelledby="dock-title" hidden>
+      <h3 id="dock-title">OBS Dock</h3>
+      <label class="toggle"><input id="dock-enable" type="checkbox"> Enable local dock URL</label>
+      <label class="toggle"><input id="dock-shared" type="checkbox"> Share this app’s settings and linked music</label>
+      <p class="sub">Shared mode follows this desktop profile. Separate mode has its own library and settings.</p>
+      <label>Local port <input id="dock-port" type="number" min="1" max="65535" step="1" placeholder="Auto"></label>
+      <div class="device-tools"><button id="dock-check" type="button">Check port</button></div>
+      <label>Dock URL <input id="dock-url" type="text" readonly placeholder="Enable and apply to get a URL"></label>
+      <div class="device-tools"><button id="dock-copy" type="button" disabled>Copy URL</button></div>
+      <label>When closing the window <select id="dock-close-action">
+        <button type="button"><selectedcontent></selectedcontent></button>
+        <option value="ask">Ask every time</option><option value="tray">Keep running in the system tray</option><option value="quit">Quit Station Pilot</option>
+      </select></label>
+      <div class="device-tools"><button id="dock-apply" type="button" class="primary">Apply dock and tray settings</button></div>
+      <p id="dock-feedback" class="sub" role="status"></p>
     </section>
     <section class="settings-section" aria-labelledby="backup-title">
       <h3 id="backup-title">Settings backup</h3>
@@ -142,6 +160,15 @@
       <p id="settings-feedback" class="sub" role="status" hidden></p>
     </section>
     <div class="dialog-actions"><button id="general-output" type="button">Output settings</button><button class="primary">Done</button></div>
+  </form></dialog>
+  <dialog id="close-desktop-dialog" aria-labelledby="close-desktop-title"><form method="dialog">
+    <h2 id="close-desktop-title">Close Station Pilot?</h2>
+    <p class="sub">Keeping it in the tray leaves playout and the OBS dock available. Quitting stops them.</p>
+    <div class="dialog-actions">
+      <button>Cancel</button>
+      <button type="button" data-desktop-close="quit">Quit</button>
+      <button type="button" data-desktop-close="tray" class="primary">Keep in tray</button>
+    </div>
   </form></dialog>
   <dialog id="import-settings-dialog" aria-labelledby="import-settings-title"><form id="import-settings-form">
     <h2 id="import-settings-title">Import settings?</h2>
