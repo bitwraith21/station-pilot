@@ -210,12 +210,21 @@ async fn save_export(filename: String, contents: String, reveal: Option<bool>) -
 
 #[tauri::command]
 fn donate() -> Result<(), String> {
+    open_browser("https://ko-fi.com/bitwraith21")
+}
+
+#[tauri::command]
+fn open_releases() -> Result<(), String> {
+    open_browser(crate::RELEASES_URL)
+}
+
+fn open_browser(url: &str) -> Result<(), String> {
     Command::new(if cfg!(target_os = "macos") {
         "open"
     } else {
         "xdg-open"
     })
-    .arg("https://ko-fi.com/bitwraith21")
+    .arg(url)
     .spawn()
     .map(|_| ())
     .map_err(|e| e.to_string())
@@ -248,7 +257,7 @@ pub fn main() {
     let bookmarks = data.join("MusicLinks");
     tauri::Builder::default()
         .manage(Library::open(bookmarks).expect("Could not open music links"))
-        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate,crate::dock::dock_command])
+        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate,open_releases,crate::dock::dock_command])
         .setup(move |app| {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Station Pilot").inner_size(1280.0,850.0).min_inner_size(560.0,480.0)

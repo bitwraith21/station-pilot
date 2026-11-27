@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; media-src blob:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' blob:; media-src blob:; connect-src 'self' ipc: http://ipc.localhost https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Station Pilot</title>
   <link rel="icon" href="icon.png" type="image/png">
   <link rel="stylesheet" href="style.css">
@@ -131,7 +131,7 @@
     <h2 id="general-title">Settings</h2>
     <section class="settings-section" aria-labelledby="about-title">
       <h3 id="about-title">About Station Pilot</h3>
-      <p class="sub">Version 0.4.4 · Local radio playout</p>
+      <p class="sub">Version <span id="app-version">0.4.8</span> · Local radio playout</p>
       <p class="sub">Linked audio stays on its original drive. Your library information, queue, schedules, and settings stay in this workstation profile.</p>
       <a class="button-link kofi-link" data-donate href="https://ko-fi.com/bitwraith21" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a>
     </section>
@@ -152,6 +152,16 @@
       <div class="device-tools"><button id="dock-apply" type="button" class="primary">Apply dock and tray settings</button></div>
       <p id="dock-feedback" class="sub" role="status"></p>
     </section>
+    <section id="updates-section" class="settings-section" aria-labelledby="updates-title" hidden>
+      <h3 id="updates-title">Updates</h3>
+      <label class="toggle"><input id="updates-auto" type="checkbox"> Automatically check for updates</label>
+      <div class="device-tools">
+        <button id="updates-check" type="button">Check for updates</button>
+        <button id="updates-now" type="button" class="primary" hidden>Update now…</button>
+        <button id="updates-release" type="button" hidden>View release and downloads</button>
+      </div>
+      <p id="updates-status" class="sub" role="status" hidden></p>
+    </section>
     <section class="settings-section" aria-labelledby="backup-title">
       <h3 id="backup-title">Settings backup</h3>
       <p class="sub">Back up your preferences, linked folders, and track details as JSON. Audio files stay in their original locations.</p>
@@ -160,6 +170,16 @@
       <p id="settings-feedback" class="sub" role="status" hidden></p>
     </section>
     <div class="dialog-actions"><button id="general-output" type="button">Output settings</button><button class="primary">Done</button></div>
+  </form></dialog>
+  <dialog id="update-dialog" aria-labelledby="update-title"><form id="update-form">
+    <h2 id="update-title">Update Station Pilot</h2>
+    <p id="update-summary"></p>
+    <progress id="update-progress" max="100" hidden aria-label="Update download progress"></progress>
+    <p id="update-status" class="sub" role="status"></p>
+    <div class="dialog-actions">
+      <button id="update-later" type="button" data-close>Later</button>
+      <button id="update-install" class="primary">Download and install</button>
+    </div>
   </form></dialog>
   <dialog id="close-desktop-dialog" aria-labelledby="close-desktop-title"><form method="dialog">
     <h2 id="close-desktop-title">Close Station Pilot?</h2>
@@ -236,7 +256,7 @@
   <dialog id="settings-dialog"><form id="settings-form">
     <h2>Output settings</h2>
     <label>Audio output device <select name="sink" aria-label="Audio output device"><button type="button"><selectedcontent></selectedcontent></button><option value="">System default</option></select></label>
-    <div class="device-tools"><button id="refresh-outputs" type="button">Refresh outputs</button><button id="choose-output" type="button" hidden>Choose device</button><button id="windows-volume-mixer" type="button" hidden>Windows Volume Mixer</button></div>
+    <div class="device-tools"><button id="audio-access" type="button" hidden>Audio device access…</button><button id="refresh-outputs" type="button">Refresh outputs</button><button id="choose-output" type="button" hidden>Choose device</button><button id="windows-volume-mixer" type="button" hidden>Windows Volume Mixer</button></div>
     <p id="output-help" class="sub" role="status"></p>
     <label>Program channels <select name="output"><button type="button"><selectedcontent></selectedcontent></button><option value="stereo">Stereo</option><option value="mono">Mono (dual mono)</option></select></label>
     <label>Transition overlap (seconds) <input name="fade" type="number" min="0" max="12" step="0.5" required></label>
@@ -244,6 +264,16 @@
     <label class="toggle"><input type="checkbox" name="artwork"> Show embedded cover art</label>
     <label class="toggle"><input type="checkbox" name="rotateArtwork"> Rotate the program platter</label>
     <div class="dialog-actions"><button type="button" data-close>Cancel</button><button class="primary">Save settings</button></div>
+  </form></dialog>
+  <dialog id="audio-access-dialog" aria-labelledby="audio-access-title"><form id="audio-access-form">
+    <h2 id="audio-access-title">Audio device access</h2>
+    <p>WebView2 uses microphone permission to list speakers, HDMI outputs, and USB audio devices. Station Pilot reads this list without opening the microphone.</p>
+    <p class="sub" id="audio-access-status" role="status"></p>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancel</button>
+      <button id="audio-access-reset" value="reset" hidden>Remove access</button>
+      <button id="audio-access-allow" class="primary" value="allow">Allow access</button>
+    </div>
   </form></dialog>
   <dialog id="processor-dialog"><form id="processor-form">
     <h2>Program audio processor</h2>

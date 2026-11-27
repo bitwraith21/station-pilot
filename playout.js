@@ -206,7 +206,8 @@ class Playout {
   }
 
   async routeOutput(id) {
-    if (!this.context) return;
+    if (!this.context && !id) return;
+    this.initialize();
     if (typeof this.context.setSinkId !== "function") {
       if (id) throw new Error("This browser cannot select an audio output.");
       return;

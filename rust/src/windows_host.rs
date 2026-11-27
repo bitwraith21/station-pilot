@@ -7,7 +7,7 @@ use std::{
 };
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
-use webview2_com::{Microsoft::Web::WebView2::Win32::*, WebResourceRequestedEventHandler, WebMessageReceivedEventHandler};
+use webview2_com::{Microsoft::Web::WebView2::Win32::*, SetPermissionStateCompletedHandler, WebResourceRequestedEventHandler, WebMessageReceivedEventHandler};
 use windows::{
     core::{w, Interface, HSTRING, PWSTR},
     Win32::{
@@ -23,7 +23,7 @@ use windows::{
         UI::{
             Shell::{
                 Common::COMDLG_FILTERSPEC, FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, SHCreateMemStream,
-                ShellExecuteW, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
+                SetCurrentProcessExplicitAppUserModelID, ShellExecuteW, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM,
                 FOS_NOCHANGEDIR, FOS_OVERWRITEPROMPT, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
             },
             WindowsAndMessaging::{
@@ -37,9 +37,9 @@ use windows::{
 
 const ORIGIN: &str = "http://127.0.0.1:8765/";
 #[cfg(not(feature = "offline"))]
-const PRODUCT: &str = "{074DC957-69CE-49CF-9387-A3AE73F78379}";
+const PRODUCT: &str = "{59352330-A9F0-40D0-ACDA-7E56A79DF9C2}";
 #[cfg(feature = "offline")]
-const PRODUCT: &str = "{FE1E8D43-6D12-4156-B7B2-8BEF88FD5B08}";
+const PRODUCT: &str = "{450A00A2-E22F-4F08-8A65-CAF0955F1002}";
 
 use crate::ASSETS;
 
@@ -179,6 +179,13 @@ fn attach_assets(core: &ICoreWebView2) -> Result<()> {
             let mut address = PWSTR::null();
             request.Uri(&mut address)?;
             let address = webview2_com::take_pwstr(address);
+            if address == "https://api.github.com/repos/bitwraith21/station-pilot/releases/latest" {
+                let mut method = PWSTR::null();
+                request.Method(&mut method)?;
+                if webview2_com::take_pwstr(method) == "GET" {
+                    return Ok(());
+                }
+            }
             let path = address.strip_prefix(ORIGIN).unwrap_or("~");
             let path = if path.is_empty() { "index.html" } else { path };
             let response = if let Some((_, content_type, bytes)) = ASSETS.iter().find(|asset| asset.0 == path) {
@@ -316,6 +323,41 @@ fn send_handles(core: &ICoreWebView2_23, environment: &ICoreWebView2Environment1
     }
 }
 
+#[derive(serde::Deserialize)]
+struct AudioAccessRequest {
+    id: String,
+    action: String,
+}
+
+fn audio_access_reply(core: &ICoreWebView2, id: &str, result: windows::core::Result<()>) {
+    let reply = serde_json::json!({
+        "type": "pilot-audio-access",
+        "id": id,
+        "error": result.err().map(|error| error.to_string()),
+    });
+    let _ = unsafe { core.PostWebMessageAsJson(&HSTRING::from(reply.to_string())) };
+}
+
+fn change_audio_access(core: &ICoreWebView2, request: AudioAccessRequest) {
+    let permission = match request.action.as_str() {
+        "allow" => COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+        "reset" => COREWEBVIEW2_PERMISSION_STATE_DEFAULT,
+        _ => return,
+    };
+    let sender = core.clone();
+    let id = request.id.clone();
+    let complete = SetPermissionStateCompletedHandler::create(Box::new(move |result| {
+        audio_access_reply(&sender, &id, result);
+        Ok(())
+    }));
+    let change = || unsafe {
+        let profile = core.cast::<ICoreWebView2_13>()?.Profile()?.cast::<ICoreWebView2Profile4>()?;
+        profile.SetPermissionState(COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, &HSTRING::from(ORIGIN),
+            permission, &complete)
+    };
+    if let Err(error) = change() { audio_access_reply(core, &request.id, Err(error)); }
+}
+
 fn picker_error(core: &ICoreWebView2, request: &str) {
     let json = HSTRING::from(format!(r#"{{"type":"pilot-picker-error","request":"{request}"}}"#));
     let _ = unsafe { core.PostWebMessageAsJson(&json) };
@@ -427,6 +469,7 @@ fn run() -> Result<()> {
         _ => {}
     }
 
+    let _ = unsafe { SetCurrentProcessExplicitAppUserModelID(w!("org.stationpilot.workstation")) };
     let stop = Handle(unsafe { CreateEventW(None, true, false, &named("-Stop"))? });
     configure_runtime(&install)?;
     let profile = data.join("WebView");
@@ -438,7 +481,8 @@ fn run() -> Result<()> {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External("about:blank".parse()?))
                 .title("Station Pilot").inner_size(1280.0, 850.0).min_inner_size(560.0, 480.0)
                 .data_directory(profile).disable_drag_drop_handler()
-                .additional_browser_args("--disable-background-networking --disable-background-timer-throttling --disable-renderer-backgrounding --disk-cache-size=16777216 --autoplay-policy=no-user-gesture-required")
+                .additional_browser_args("--disable-background-networking --disable-background-timer-throttling --disable-renderer-backgrounding --disk-cache-size=16777216 --autoplay-policy=no-user-gesture-required --disable-features=HardwareMediaKeyHandling")
+                .initialization_script(if cfg!(feature = "offline") { "" } else { "window.stationPilotInAppUpdates = true;" })
                 .on_navigation(|url| url.as_str() == ORIGIN || url.as_str() == "about:blank")
                 .build()?;
             let dock = crate::dock::Dock::attach(&window, data.clone())?;
@@ -452,6 +496,8 @@ fn run() -> Result<()> {
                     let environment = core.cast::<ICoreWebView2_2>()?.Environment()?.cast::<ICoreWebView2Environment14>()?;
                     let root = data.join("MusicLinks");
                     register_drops(picker.clone(), environment.clone(), root.clone())?;
+                    let updater = crate::windows_update::Updater::new(window_copy.clone(), &data);
+                    let media = crate::windows_media::WindowsMedia::attach(&window_copy, HWND(owner as *mut _)).ok();
                     let listener = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
                         let Some(args) = args else { return Ok(()) };
                         let mut source = PWSTR::null();
@@ -471,6 +517,23 @@ fn run() -> Result<()> {
                                         Err(error) => serde_json::json!({"type":"pilot-dock","id":message.id,"error":error}),
                                     };
                                     picker.PostWebMessageAsJson(&HSTRING::from(response.to_string()))?;
+                                }
+                            }
+                            value if value.starts_with("audio-access:") => {
+                                if let Ok(request) = serde_json::from_str(&value["audio-access:".len()..]) {
+                                    change_audio_access(&picker, request);
+                                }
+                            }
+                            value if value.starts_with("media-playback:") => {
+                                if let (Some(media), Ok(playback)) = (
+                                    &media, serde_json::from_str::<Option<crate::windows_media::Playback>>(&value["media-playback:".len()..])
+                                ) {
+                                    let _ = media.publish(playback);
+                                }
+                            }
+                            value if value.starts_with("install-update:") => {
+                                if let Ok(request) = serde_json::from_str(&value["install-update:".len()..]) {
+                                    updater.handle(request);
                                 }
                             }
                             "pilot-ready" => picker.PostWebMessageAsJson(w!(r#"{"type":"pilot-picker-ready"}"#))?,
@@ -508,9 +571,13 @@ fn run() -> Result<()> {
                                     });
                                 });
                             }
-                            "open-donation" | "open-volume-mixer" => {
-                                let link = if body == "open-donation" { w!("https://ko-fi.com/bitwraith21") } else { w!("ms-settings:apps-volume") };
-                                ShellExecuteW(None, w!("open"), link, None, None, windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL);
+                            "open-donation" | "open-volume-mixer" | "open-releases" => {
+                                let link = match body.as_str() {
+                                    "open-donation" => "https://ko-fi.com/bitwraith21",
+                                    "open-volume-mixer" => "ms-settings:apps-volume",
+                                    _ => crate::RELEASES_URL,
+                                };
+                                ShellExecuteW(None, w!("open"), &HSTRING::from(link), None, None, windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL);
                             }
                             _ => if let Some(key) = body.strip_prefix("restore:").filter(|key| valid_key(key)) {
                                 if restore(&root, key).and_then(|entry| send_handles(&picker, &environment, &[entry], key)).is_err() {

@@ -15,11 +15,11 @@ $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPat
 $object = Join-Path $build 'StationPilot.wixobj'
 $manifest = Join-Path $source 'rust/Cargo.toml'
 $compactValue = 'no'
-$productCode = '{FE1E8D43-6D12-4156-B7B2-8BEF88FD5B08}'
+$productCode = '{450A00A2-E22F-4F08-8A65-CAF0955F1002}'
 $config = @('--features', 'offline')
 if ($Compact) {
     $compactValue = 'yes'
-    $productCode = '{074DC957-69CE-49CF-9387-A3AE73F78379}'
+    $productCode = '{59352330-A9F0-40D0-ACDA-7E56A79DF9C2}'
     $config = @()
 } elseif (!$WebViewRuntime) {
     throw 'Pass -WebViewRuntime for the offline installer.'
