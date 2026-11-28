@@ -917,17 +917,26 @@ function bindLinkedLibrary() {
     previewDialog.close();
     linkHandles(handles, { ...options, scans, order: $("music-filename-order").value });
   });
-  window.addEventListener("station-native-drop", event => {
+  window.addEventListener("station-native-drag", ({ detail }) => {
+    if (!window.stationPilotUnix) return;
+    clearDrop();
+    if (!detail) return;
+    const target = document.elementFromPoint(detail.x, detail.y);
+    const zone = target?.closest("[data-drop]");
+    if (zone) highlightDrop(zone, { target, clientY: detail.y });
+  });
+  window.addEventListener("station-native-drop", ({ detail }) => {
     if (!window.stationPilotUnix || dragged) return;
-    const { links, x, y } = event.detail;
-    const list = document.elementFromPoint(x, y)?.closest("[data-drop]")?.dataset.drop || "library";
-    const targetDeck = ["A","B"].includes(list) ? list : null;
-    if (targetDeck && (links.length !== 1 || links[0].kind !== "file")) return notify("Drop one song on a deck.", true);
+    clearDrop();
+    const { links, x, y } = detail;
+    if (!links.length) return notify("Could not open the dropped files.", true);
     const target = document.elementFromPoint(x, y);
-    const row = target?.closest("tr[data-entry]");
-    const bounds = row?.getBoundingClientRect();
-    previewMusic(links.map(unixHandle), { list, targetDeck, anchor: row?.dataset.entry,
-      after: Boolean(bounds && y >= bounds.top + bounds.height / 2) });
+    const zone = target?.closest("[data-drop]");
+    const list = zone?.dataset.drop || "library";
+    const targetDeck = ["A", "B"].includes(list) ? list : null;
+    if (targetDeck && (links.length !== 1 || links[0].kind !== "file")) return notify("Drop one song on a deck.", true);
+    const position = zone ? dropPosition({ target, clientY: y }, zone) : { row: null, after: false };
+    previewMusic(links.map(unixHandle), { list, targetDeck, anchor: position.row?.dataset.entry, after: position.after });
   });
   $("include-subfolders").addEventListener("change", drawFolders);
   $("reconnect-choose").addEventListener("click", restoreSelection);

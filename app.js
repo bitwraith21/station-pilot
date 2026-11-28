@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 const initialState = {
   queue: [], events: [],
   settings: { auto: true, scheduler: false, output: "stereo", sinkId: "", gain: 65, fade: 2, rotation: false,
-    keyLock: true, artwork: true, rotateArtwork: true, processor: PROCESSOR_DEFAULTS }
+    keyLock: true, artwork: true, rotateArtwork: true, checkUpdates: false, processor: PROCESSOR_DEFAULTS }
 };
 const tracks = new Map();
 let state, store, engine;
@@ -164,22 +164,73 @@ function place(from, id, to, anchor, after) {
   queueUpdated();
 }
 
+function beginTrackDrag(row, list, id) {
+  const selection = selected[list];
+  const ids = !selection?.has(id) ? [id] : list === "queue"
+    ? state.queue.filter(item => selection.has(item.id) && item.id !== pendingId()).map(item => item.id)
+    : orderedLibrary.filter(({ track }) => selection.has(track.id)).map(({ track }) => track.id);
+  dragged = { list, id, ids, row };
+  row.classList.add("dragging");
+}
+
 function dragRow(row, list, id, locked = false) {
   row.dataset.entry = id;
-  row.draggable = !locked;
+  if (locked) return;
+  if (window.stationPilotLinux) {
+    bindPointerDrag(row, list, id);
+    return;
+  }
+  row.draggable = true;
   row.addEventListener("dragstart", event => {
-    if (locked || !event.dataTransfer) return event.preventDefault();
-    const selection = selected[list];
-    const ids = !selection?.has(id) ? [id] : list === "queue"
-      ? state.queue.filter(item => selection.has(item.id) && item.id !== pendingId()).map(item => item.id)
-      : orderedLibrary.filter(({ track }) => selection.has(track.id)).map(({ track }) => track.id);
-    dragged = { list, id, ids, row };
+    if (!event.dataTransfer) return event.preventDefault();
+    beginTrackDrag(row, list, id);
     event.dataTransfer.setData("application/x-station-pilot-track", id);
     event.dataTransfer.setData("text/plain", row.querySelector(".drag-name")?.textContent || row.textContent);
     event.dataTransfer.effectAllowed = list === "library" ? "copy" : "move";
-    row.classList.add("dragging");
   });
   row.addEventListener("dragend", finishDrag);
+}
+
+function bindPointerDrag(row, list, id) {
+  let press;
+  row.classList.add("pointer-drag");
+  row.addEventListener("pointerdown", event => {
+    if (!event.isPrimary || event.button !== 0 || event.target.closest("button, input, select, textarea, a")) return;
+    if (event.pointerType === "touch" && !event.target.closest(".grip")) return;
+    press = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    row.setPointerCapture(event.pointerId);
+  });
+  row.addEventListener("pointermove", event => {
+    if (press?.id !== event.pointerId) return;
+    if (!dragged && Math.hypot(event.clientX - press.x, event.clientY - press.y) >= 5) {
+      beginTrackDrag(row, list, id);
+    }
+    if (dragged?.row !== row) return;
+    event.preventDefault();
+    clearDrop();
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const zone = target?.closest("[data-drop]");
+    if (acceptsTrackDrop(zone)) highlightDrop(zone, { target, clientY: event.clientY });
+  });
+  row.addEventListener("pointerup", event => {
+    if (press?.id !== event.pointerId) return;
+    press = null;
+    if (dragged?.row !== row) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const zone = target?.closest("[data-drop]");
+    const source = dragged;
+    if (acceptsTrackDrop(zone)) {
+      const { row: anchor, after } = dropPosition({ target, clientY: event.clientY }, zone);
+      finishDrag();
+      dropTracks(source, zone.dataset.drop, anchor?.dataset.entry, after);
+    } else {
+      finishDrag();
+    }
+  });
+  row.addEventListener("lostpointercapture", () => {
+    press = null;
+    if (dragged?.row === row) finishDrag();
+  });
 }
 
 const estimateClock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
@@ -601,6 +652,16 @@ function dropPosition(event, zone) {
   return { row, after: event.clientY >= bounds.top + bounds.height / 2 };
 }
 
+function highlightDrop(zone, position) {
+  highlightedDrop = zone;
+  zone.classList.add("drop-active");
+  const { row, after } = dropPosition(position, zone);
+  if (row && zone.dataset.drop !== "library") {
+    highlightedRow = row;
+    row.dataset.insert = after ? "after" : "before";
+  }
+}
+
 function cueDropped(name, entry) {
   const loaded = entryFor(entry);
   if (!loaded || loaded.stop || entry.id === pendingId()) return;
@@ -610,25 +671,50 @@ function cueDropped(name, entry) {
   note("Deck " + name + " cued · " + loaded.track.title);
 }
 
+function acceptsTrackDrop(zone) {
+  if (!zone || !dragged || zone.dataset.drop === "library") return false;
+  return !["A", "B"].includes(zone.dataset.drop) || dragged.list !== "queue"
+    || !state.queue.some(item => item.id === dragged.id && item.stop);
+}
+
+function dropTracks(source, list, anchor, after) {
+  if (list === "A" || list === "B") {
+    const track = source.list === "library" ? tracks.get(source.id) : null;
+    const entry = source.list === "queue" ? state.queue.find(item => item.id === source.id) : track && newEntry(track);
+    if (entry) cueDropped(list, entry);
+  } else if (list === "queue") {
+    if (source.ids.length === 1) place(source.list, source.id, list, anchor, after);
+    else if (source.list === "library" || !source.ids.includes(anchor)) {
+      const ids = new Set(source.ids);
+      const group = source.list === "queue" ? state.queue.filter(item => ids.has(item.id))
+        : source.ids.map(id => tracks.get(id)).filter(Boolean).map(newEntry);
+      if (!group.length) return;
+      if (source.list === "queue") state.queue = state.queue.filter(item => !ids.has(item.id));
+      else {
+        for (const item of group) selected.library.delete(item.trackId);
+        drawLibrary();
+      }
+      const index = state.queue.findIndex(item => item.id === anchor);
+      const slot = index < 0 ? state.queue.length : index + Number(after);
+      state.queue.splice(Math.max(slot, state.queue[0]?.id === pendingId() && pendingId() ? 1 : 0), 0, ...group);
+      record(null, source.list === "queue" ? "Queue reordered" : "Tracks queued", group.length + " items");
+      queueUpdated();
+    }
+  }
+}
+
 function bindDrop() {
   document.addEventListener("dragover", event => {
     const external = fileDrag(event);
     if (external || dragged) event.preventDefault();
     clearDrop();
     const zone = dropZone(event);
-    const marker = !external && dragged?.list === "queue" && state.queue.some(item => item.id === dragged.id && item.stop);
-    if (!zone || (marker && ["A", "B"].includes(zone.dataset.drop)) || (!external && (!dragged || zone.dataset.drop === "library"))) {
+    if (!zone || (!external && !acceptsTrackDrop(zone))) {
       if (external || dragged) event.dataTransfer.dropEffect = "none";
       return;
     }
-    highlightedDrop = zone;
-    zone.classList.add("drop-active");
     event.dataTransfer.dropEffect = external || dragged.list === "library" ? "copy" : "move";
-    const { row, after } = dropPosition(event, zone);
-    if (row && zone.dataset.drop !== "library") {
-      highlightedRow = row;
-      row.dataset.insert = after ? "after" : "before";
-    }
+    highlightDrop(zone, event);
   });
   document.addEventListener("dragleave", event => {
     if (!event.relatedTarget && event.target === document.documentElement) clearDrop();
@@ -645,29 +731,7 @@ function bindDrop() {
     const source = dragged;
     finishDrag();
     if (!external) {
-      if (list === "A" || list === "B") {
-        const track = source.list === "library" ? tracks.get(source.id) : null;
-        const entry = source.list === "queue" ? state.queue.find(item => item.id === source.id) : track && newEntry(track);
-        if (entry) cueDropped(list, entry);
-      } else if (list === "queue") {
-        if (source.ids.length === 1) place(source.list, source.id, list, anchor, after);
-        else if (source.list === "library" || !source.ids.includes(anchor)) {
-          const ids = new Set(source.ids);
-          const group = source.list === "queue" ? state.queue.filter(item => ids.has(item.id))
-            : source.ids.map(id => tracks.get(id)).filter(Boolean).map(newEntry);
-          if (!group.length) return;
-          if (source.list === "queue") state.queue = state.queue.filter(item => !ids.has(item.id));
-          else {
-            for (const item of group) selected.library.delete(item.trackId);
-            drawLibrary();
-          }
-          const index = state.queue.findIndex(item => item.id === anchor);
-          const slot = index < 0 ? state.queue.length : index + Number(after);
-          state.queue.splice(Math.max(slot, state.queue[0]?.id === pendingId() && pendingId() ? 1 : 0), 0, ...group);
-          record(null, source.list === "queue" ? "Queue reordered" : "Tracks queued", group.length + " items");
-          queueUpdated();
-        }
-      }
+      dropTracks(source, list, anchor, after);
       return;
     }
     if (dockShared) return notify("Link music in the Station Pilot desktop app.", true);
@@ -733,8 +797,33 @@ function drawHistory() {
   $("export").disabled = recent.length === 0;
 }
 
+let lastWindowsPlayback;
+function publishWindowsPlayback() {
+  if (!windowsBridge) return;
+  const deck = engine.current;
+  const playback = deck ? {
+    title: deck.entry.track.title || "Station Pilot",
+    artist: deck.entry.track.artist || "",
+    playing: !deck.audio.paused || engine.scratch?.deck === deck
+  } : null;
+  const message = JSON.stringify(playback);
+  if (message === lastWindowsPlayback) return;
+  windowsBridge.postMessage("media-playback:" + message);
+  lastWindowsPlayback = message;
+}
+
+if (windowsBridge) {
+  window.pilotMediaAction = playing => {
+    const deck = engine?.current;
+    if (!deck) return;
+    const currentlyPlaying = !deck.audio.paused || engine.scratch?.deck === deck;
+    if (playing !== currentlyPlaying) engine.toggle();
+  };
+}
+
 function drawDecks() {
   const active = engine.current;
+  publishWindowsPlayback();
   const playing = [active, engine.secondary, engine.outgoing].some(deck => deck && !deck.audio.paused);
   const cued = engine.cues.size > 0;
   const busy = Boolean(engine.pending || engine.starting);
@@ -1104,7 +1193,9 @@ async function availableOutputs() {
   return devices.filter(device => device.kind === "audiooutput" && device.deviceId && device.deviceId !== "default");
 }
 
+let outputRefresh = 0;
 async function refreshOutputs(selected, granted) {
+  const revision = ++outputRefresh;
   const picker = $("settings-form").elements.sink;
   const support = canSelectOutput();
   picker.options.length = 0;
@@ -1118,6 +1209,7 @@ async function refreshOutputs(selected, granted) {
   if (!support) return;
   try {
     const outputs = await availableOutputs();
+    if (revision !== outputRefresh) return;
     const original = picker.value;
     picker.options.length = 1;
     outputs.forEach((device, i) => picker.add(new Option(device.label || "Output " + (i + 1), device.deviceId)));
@@ -1126,16 +1218,249 @@ async function refreshOutputs(selected, granted) {
     }
     picker.value = original;
     if (windowsBridge) {
-      $("output-help").textContent = "For devices missing here, select System default, start playback, then open Windows Volume Mixer to change the app’s output.";
+      $("output-help").textContent = outputs.length
+        ? "Select an output and save to route program audio."
+        : "Open Audio device access to list connected speakers and HDMI outputs.";
     } else if (!outputs.length && !granted) {
       $("output-help").textContent = "No additional outputs are available. Use System default or select a device in your operating system.";
     }
   } catch (error) {
-    $("output-help").textContent = "Could not read audio outputs. " + error.message;
+    if (revision === outputRefresh) $("output-help").textContent = "Could not read audio outputs. " + error.message;
   }
 }
 
+function changeWindowsAudioAccess(action) {
+  const id = workstationId();
+  return new Promise((resolve, reject) => {
+    const finish = error => {
+      clearTimeout(timer);
+      windowsBridge.removeEventListener("message", receive);
+      if (error) reject(new Error(error));
+      else resolve();
+    };
+    const receive = ({ data }) => {
+      if (data?.type === "pilot-audio-access" && data.id === id) finish(data.error);
+    };
+    const timer = setTimeout(() => finish("WebView2 did not respond. Try again."), 10000);
+    windowsBridge.addEventListener("message", receive);
+    try { windowsBridge.postMessage("audio-access:" + JSON.stringify({ id, action })); }
+    catch (error) { finish(error.message); }
+  });
+}
+
+function bindWindowsAudioAccess() {
+  if (!windowsBridge || dockPath || !canSelectOutput()) return;
+  const button = $("audio-access");
+  const dialog = $("audio-access-dialog");
+  const form = $("audio-access-form");
+  const status = $("audio-access-status");
+  const reset = $("audio-access-reset");
+  const allow = $("audio-access-allow");
+  let busy = false;
+  button.hidden = false;
+  button.addEventListener("click", async () => {
+    allow.hidden = false;
+    reset.hidden = true;
+    status.textContent = "Permission applies to this Station Pilot desktop profile.";
+    dialog.showModal();
+    try {
+      const permission = await navigator.permissions.query({ name: "microphone" });
+      if (!dialog.open || busy) return;
+      if (permission.state === "granted") {
+        allow.hidden = true;
+        reset.hidden = false;
+        status.textContent = "Access is enabled. Removing access switches program audio to System default.";
+      }
+    } catch { /* Older runtimes can still process explicit permission requests. */ }
+  });
+  dialog.addEventListener("cancel", event => { if (busy) event.preventDefault(); });
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (busy || !event.submitter) return;
+    const removing = event.submitter === reset;
+    const previous = state.settings.sinkId;
+    const selected = $("settings-form").elements.sink.value;
+    busy = true;
+    for (const control of form.elements) control.disabled = true;
+    try {
+      if (removing) await engine.routeOutput("");
+      try { await changeWindowsAudioAccess(removing ? "reset" : "allow"); }
+      catch (error) {
+        if (removing && previous) await engine.routeOutput(previous);
+        throw error;
+      }
+      if (removing) {
+        state.settings.sinkId = "";
+        await save();
+      }
+      await refreshOutputs(removing ? "" : selected);
+      dialog.close();
+    } catch (error) { status.textContent = "Could not change audio device access. " + error.message; }
+    finally {
+      busy = false;
+      for (const control of form.elements) control.disabled = false;
+    }
+  });
+}
+
+let installingUpdate = false;
+
+function bindUpdates() {
+  if (!windowsBridge && !window.stationPilotUnix) return;
+
+  const endpoint = "https://api.github.com/repos/bitwraith21/station-pilot/releases/latest";
+  const version = $("app-version").textContent.trim();
+  const enabled = $("updates-auto");
+  const check = $("updates-check");
+  const release = $("updates-release");
+  const status = $("updates-status");
+  const updateNow = $("updates-now");
+  const dialog = $("update-dialog");
+  const progress = $("update-progress");
+  const result = $("update-status");
+  const confirm = $("update-install");
+  const later = $("update-later");
+  let notifiedVersion;
+  let availableTag;
+  let selectedTag;
+  let downloading = false;
+  let downloaded = false;
+
+  const showResult = message => { result.textContent = message; };
+  const busy = value => { confirm.disabled = later.disabled = value; };
+  const install = async () => {
+    if (engine.armed || engine.pending || engine.starting) {
+      showResult("The update is ready. Stop playout before installing.");
+      busy(false);
+      return;
+    }
+    installingUpdate = true;
+    busy(true);
+    try {
+      await store.save(state);
+      showResult("Installing… Station Pilot will close and reopen when setup finishes.");
+      windowsBridge.postMessage('install-update:{"action":"install"}');
+    } catch (error) {
+      installingUpdate = false;
+      showResult("Could not start setup. " + error.message);
+      busy(false);
+    }
+  };
+  if (window.stationPilotInAppUpdates && windowsBridge && !dockPath) {
+    updateNow.addEventListener("click", () => {
+      if (!availableTag) return;
+      if (selectedTag !== availableTag) downloaded = false;
+      selectedTag = availableTag;
+      $("update-summary").textContent = "Install Station Pilot " + selectedTag.replace(/^v/, "") + "? Station Pilot will close and reopen during setup.";
+      progress.hidden = !downloaded;
+      if (downloaded) progress.value = 100;
+      confirm.textContent = downloaded ? "Install and restart" : "Download and install";
+      showResult(downloaded ? "The verified installer is ready." : "");
+      dialog.showModal();
+    });
+    dialog.addEventListener("cancel", event => {
+      if (downloading || installingUpdate) event.preventDefault();
+    });
+    $("update-form").addEventListener("submit", event => {
+      event.preventDefault();
+      if (downloading || installingUpdate) return;
+      if (downloaded) { install(); return; }
+      downloading = true;
+      busy(true);
+      progress.hidden = false;
+      progress.removeAttribute("value");
+      showResult("Checking the installer on GitHub…");
+      windowsBridge.postMessage("install-update:" + JSON.stringify({ action: "download", tag: selectedTag }));
+    });
+    window.pilotUpdateStatus = update => {
+      if (update.error) {
+        downloading = installingUpdate = downloaded = false;
+        busy(false);
+        progress.hidden = true;
+        confirm.textContent = "Download and install";
+        showResult(update.error);
+      } else if (update.ready) {
+        downloading = false;
+        downloaded = true;
+        confirm.textContent = "Install and restart";
+        install();
+      } else if (update.total) {
+        const percent = Math.floor(100 * update.received / update.total);
+        progress.value = percent;
+        showResult("Downloading… " + percent + "%");
+      }
+    };
+  }
+
+  const report = message => {
+    status.textContent = message;
+    status.hidden = !message;
+  };
+
+  const checkNow = async (manual = false) => {
+    if (check.disabled) return;
+    check.disabled = true;
+    report("Checking GitHub for updates…");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(endpoint, { credentials: "omit", cache: "no-cache", signal: controller.signal });
+      if (response.status === 404) {
+        release.hidden = updateNow.hidden = true;
+        report("GitHub has no published stable release.");
+        return;
+      }
+      if (response.status === 429 || (response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0")) {
+        throw new Error("GitHub’s request limit was reached. Try again later.");
+      }
+      if (!response.ok) throw new Error("GitHub returned HTTP " + response.status + ".");
+      const data = await response.json();
+      const latest = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(data.tag_name);
+      if (!latest) throw new Error("GitHub returned a release with an unsupported version tag.");
+      const difference = latest.slice(1).map((part, index) => Number(part) - Number(version.split(".")[index]));
+      const newer = (difference.find(part => part !== 0) ?? 0) > 0;
+      const message = newer ? "Station Pilot " + latest[0].replace(/^v/, "") + " is available."
+        : "You’re up to date (version " + version + ").";
+      availableTag = newer ? data.tag_name : undefined;
+      release.hidden = !newer;
+      const windowsBase = "Station-Pilot-" + latest.slice(1).join(".") + "-Windows-x64";
+      const hasInstaller = data.assets?.some(asset =>
+        [windowsBase + ".msi", windowsBase + "-Small.msi"].includes(asset.name)
+        && /^sha256:[a-f0-9]{64}$/i.test(asset.digest));
+      updateNow.hidden = !newer || !window.stationPilotInAppUpdates || !hasInstaller;
+      report(message);
+      if (newer && !manual && enabled.checked && notifiedVersion !== latest[0]) {
+        notifiedVersion = latest[0];
+        notify(message + " Open Settings → Updates for downloads.");
+      }
+    } catch (error) {
+      const details = error.name === "AbortError" || error instanceof TypeError
+        ? "Check your internet connection and try again." : error.message;
+      report("Could not check for updates. " + details);
+    } finally {
+      clearTimeout(timeout);
+      check.disabled = false;
+    }
+  };
+
+  $("updates-section").hidden = false;
+  enabled.checked = state.settings.checkUpdates;
+  enabled.addEventListener("change", () => {
+    state.settings.checkUpdates = enabled.checked;
+    save();
+    if (enabled.checked) checkNow();
+  });
+  check.addEventListener("click", () => checkNow(true));
+  release.addEventListener("click", () => {
+    if (windowsBridge) windowsBridge.postMessage("open-releases");
+    else desktopInvoke("open_releases").catch(() => report("Could not open the release page in your browser."));
+  });
+  if (enabled.checked) checkNow();
+  setInterval(() => { if (enabled.checked) checkNow(); }, 24 * 60 * 60 * 1000);
+}
+
 function syncSettingsControls() {
+  $("updates-auto").checked = state.settings.checkUpdates;
   for (const id of ["auto", "key-lock", "scheduler"]) {
     $(id).checked = state.settings[id === "key-lock" ? "keyLock" : id];
   }
@@ -1169,7 +1494,9 @@ function readSettingsBackup(backup) {
   const validToggle = value => typeof value === "boolean";
   for (const name of Object.keys(initialState.settings)) {
     if (typeof initialState.settings[name] === "boolean") {
-      settings[name] = check(source?.[name], validToggle, name);
+      const value = name === "checkUpdates" && source?.[name] === undefined
+        ? initialState.settings.checkUpdates : source?.[name];
+      settings[name] = check(value, validToggle, name);
     }
   }
   settings.output = check(source?.output, value => value === "stereo" || value === "mono", "program channels");
@@ -1378,6 +1705,7 @@ function bind() {
   $("refresh-outputs").addEventListener("click", () => refreshOutputs($("settings-form").elements.sink.value));
   $("windows-volume-mixer").hidden = !windowsBridge;
   $("windows-volume-mixer").addEventListener("click", () => windowsBridge?.postMessage("open-volume-mixer"));
+  bindWindowsAudioAccess();
   $("choose-output").hidden = !navigator.mediaDevices?.selectAudioOutput;
   $("choose-output").addEventListener("click", async () => {
     try {
@@ -1597,7 +1925,7 @@ async function start(snapshot = null) {
       $("clock").textContent = display;
       clock = display;
     }
-    scheduleTick(localStamp(now));
+    if (!installingUpdate) scheduleTick(localStamp(now));
     drawQueueEstimates();
   };
   update();
@@ -1615,6 +1943,7 @@ async function start(snapshot = null) {
   };
   requestAnimationFrame(paint);
   note("Library ready.");
+  bindUpdates();
   if (windowsBridge) windowsBridge.postMessage("pilot-ready");
   else window.chrome?.webview?.postMessage("pilot-ready");
 }

@@ -30,9 +30,25 @@ sh install.sh
 
 The install and uninstall scripts use Python 3.9 or later. Playout uses the system WKWebView on macOS or WebKitGTK 4.1 with GStreamer audio codecs on Linux. On macOS, the app shortcut appears under `~/Applications`. On Linux, use the desktop environment's application menu.
 
-### Build and install from Git on Linux
+### Linux AppImage
 
-On Zorin OS and other Ubuntu or Debian-based desktops with WebKitGTK 4.1 available, run `sh linux-install.sh` from the cloned source folder. It installs missing build packages through APT, sets up stable Rust, compiles the app, and adds a Station Pilot shortcut to your app menu. Run the script as your desktop user. It uses `sudo` when system packages need to be installed.
+Download the Linux x64 AppImage from the release that provides it. Make it executable and open it from the file manager, or run it directly from a terminal. If your distribution cannot mount AppImages, run it with the `--appimage-extract-and-run` option.
+
+The **Compact AppImage** uses the system WebKitGTK and GStreamer packages. On Zorin OS or Ubuntu, install the runtime dependencies once before using it.
+
+```sh
+sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 libxdo3 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+```
+
+### Build and install from Git on macOS or Linux
+
+From the cloned repository, run this as your desktop user.
+
+```sh
+sh install.sh
+```
+
+The script sets up stable Rust, builds Station Pilot for the current machine, and installs it for your user account. Both systems need Python 3.9 or later. On macOS, approve the Xcode Command Line Tools prompt if it appears, then rerun the script after the tools finish installing. On Zorin OS and other Debian or Ubuntu-based desktops, the script uses `sudo` and APT to install missing build dependencies. The previous `linux-install.sh` command also runs the shared installer.
 
 ### Installation paths and uninstall
 
@@ -117,7 +133,7 @@ In **Schedule → Add event**, search by title or artist, choose the track, and 
 | FM studio | Browser stereo output → audio interface → studio console or broadcast processor |
 | AM studio | Browser dual-mono output, or studio mono sum → audio interface → studio console or AM processor |
 
-Choose an available audio device in **Output settings**. The device list depends on browser and operating-system permissions. On Windows, select **System default**, start playback, then open **Windows Volume Mixer** to route the app to an output missing from its list. Set a conservative master level and verify both channels on the physical console or processor in an off-air test.
+Choose an available audio device in **Output settings**. The device list depends on browser and operating-system permissions. In the Windows desktop app, choose **Audio device access… → Allow access** to list speakers, USB devices, and HDMI monitors. Select a device and save to route both decks and the processor to it. WebView2 stores microphone permission in the app profile for device discovery. Station Pilot opens no microphone stream. To revoke it and return to the default output, select **Audio device access… → Remove access**. Set a conservative master level and verify both channels on the physical console or processor in an off-air test.
 
 Use **Settings → Settings backup** to export or import preferences as JSON. This includes master level, output, processor, platter, and automation preferences. Stop playout before importing. If the backed-up audio device is unavailable on this workstation, the current output stays selected. The library, queue, schedules, and history are stored separately.
 
@@ -139,5 +155,7 @@ After a reload, the queue and settings are restored and the transport starts in 
 - [Ots scheduling and logging](https://otslabs.ots7.com/omql-docs-osh/)
 
 ## Settings backups
+
+**Settings → Updates** checks the [latest public GitHub release](https://api.github.com/repos/bitwraith21/station-pilot/releases/latest). For each release, publish a stable tag such as `v0.4.5` and attach the Windows MSI and macOS/Linux packages to the release. Enable automatic checks to check on startup and once a day while the desktop app is open. On standard Windows installations, choose **Update now… → Download and install** to download a compatible MSI, verify its GitHub SHA-256 checksum, and restart through Windows Installer. Stop playout before setup. The GitHub downloads page remains available for manual installation and for other platforms.
 
 Export JSON in Settings saves preferences, categories, linked folders, and linked track metadata. Import merges the links, reuses available bookmarks, and opens **Locate missing music** for sources that need a new location. You can reopen the locator from Settings. The backup stores references to the original audio. Settings-only JSON backups from earlier versions still import.

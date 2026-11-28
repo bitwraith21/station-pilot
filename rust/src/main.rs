@@ -2,10 +2,16 @@
 
 #[cfg(windows)]
 mod windows_host;
+#[cfg(windows)]
+mod windows_media;
+#[cfg(windows)]
+mod windows_update;
 #[cfg(unix)]
 mod unix_host;
 
 mod dock;
+
+const RELEASES_URL: &str = "https://github.com/bitwraith21/station-pilot/releases/latest";
 
 const ASSETS: &[(&str, &str, &[u8])] = &[
     ("index.html", "text/html", include_bytes!("../../index.html")),

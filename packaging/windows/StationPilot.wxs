@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="$(var.ProductCode)" Name="Station Pilot"
-           Language="1033" Version="0.4.4" Manufacturer="Station Pilot"
+           Language="1033" Version="0.4.9" Manufacturer="Station Pilot"
            UpgradeCode="{7EFBB32D-EAA0-4273-AEFC-2E03F5204393}">
     <Package InstallerVersion="500" Platform="x64" Compressed="yes" InstallScope="perUser"
              InstallPrivileges="limited" Description="Station Pilot radio playout" />
     <MediaTemplate EmbedCab="yes"/>
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Station Pilot is already installed." />
     <Property Id="PURGEDATA" Secure="yes" />
+    <Property Id="PILOTUPDATE" Secure="yes" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Icon Id="StationPilotIcon" SourceFile="$(var.Source)\packaging\windows\StationPilot.ico" />
     <Property Id="ARPPRODUCTICON" Value="StationPilotIcon" />
@@ -59,7 +60,9 @@
       <Directory Id="ProgramMenuFolder">
         <Directory Id="StationPilotMenu" Name="Station Pilot">
           <Component Id="MenuItems" Guid="{ECB0C45F-1B31-484E-A1E1-D7F6268153BC}" Win64="no">
-            <Shortcut Id="OpenStationPilot" Name="Station Pilot" Target="[#LauncherExe]" WorkingDirectory="AppDir" Icon="StationPilotIcon" />
+            <Shortcut Id="OpenStationPilot" Name="Station Pilot" Target="[#LauncherExe]" WorkingDirectory="AppDir" Icon="StationPilotIcon">
+              <ShortcutProperty Key="System.AppUserModel.ID" Value="org.stationpilot.workstation" />
+            </Shortcut>
             <Shortcut Id="UninstallStationPilot" Name="Uninstall Station Pilot" Target="[#LauncherExe]" Arguments="--uninstall" WorkingDirectory="AppDir" />
             <RemoveFolder Id="RemoveShortcutFolder" On="uninstall" />
             <RegistryValue Root="HKCU" Key="Software\Station Pilot" Name="Shortcuts" Type="integer" Value="1" KeyPath="yes" />
@@ -79,6 +82,7 @@
     <CustomAction Id="PurgeStationPilotData" BinaryKey="CleanupLauncher" ExeCommand="--purge"
                   Execute="commit" Impersonate="yes" Return="check" />
     <InstallExecuteSequence>
+      <Custom Action="LaunchStationPilot" After="InstallFinalize">PILOTUPDATE = "1" AND NOT Installed</Custom>
       <Custom Action="CloseRunningPilot" Before="InstallValidate">NOT UPGRADINGPRODUCTCODE</Custom>
       <Custom Action="PurgeStationPilotData" Before="InstallFinalize">Installed AND REMOVE="ALL" AND PURGEDATA="1" AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>

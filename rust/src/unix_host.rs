@@ -10,7 +10,9 @@ use std::{
     process::Command,
     time::UNIX_EPOCH,
 };
-use tauri::{DragDropEvent, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::{DragDropEvent, WindowEvent};
 
 struct Library {
     directory: PathBuf,
@@ -210,15 +212,91 @@ async fn save_export(filename: String, contents: String, reveal: Option<bool>) -
 
 #[tauri::command]
 fn donate() -> Result<(), String> {
+    open_browser("https://ko-fi.com/bitwraith21")
+}
+
+#[tauri::command]
+fn open_releases() -> Result<(), String> {
+    open_browser(crate::RELEASES_URL)
+}
+
+fn open_browser(url: &str) -> Result<(), String> {
     Command::new(if cfg!(target_os = "macos") {
         "open"
     } else {
         "xdg-open"
     })
-    .arg("https://ko-fi.com/bitwraith21")
+    .arg(url)
     .spawn()
     .map(|_| ())
     .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn connect_linux_drop(target: tauri::WebviewWindow) -> tauri::Result<()> {
+    use gtk::{gdk, gio, prelude::*};
+    use std::{cell::{Cell, RefCell}, rc::Rc};
+
+    let window = target.clone();
+    target.with_webview(move |platform| {
+        let view = platform.inner();
+        let uri_list = gdk::Atom::intern("text/uri-list");
+        let external_files = move |context: &gdk::DragContext| {
+            context.drag_get_source_widget().is_none() && context.list_targets().contains(&uri_list)
+        };
+        let pending = Rc::new(RefCell::new(None::<(gdk::DragContext, i32, i32)>));
+
+        let highlight = window.clone();
+        let last_motion = Cell::new(None::<u32>);
+        view.connect_drag_motion(move |_, context, x, y, time| {
+            if !external_files(context) { return false; }
+            // GDK positions are widget coordinates and already account for display scaling.
+            context.drag_status(gdk::DragAction::COPY, time);
+            if last_motion.get().is_none_or(|last| time.wrapping_sub(last) >= 32) {
+                let _ = highlight.eval(format!(
+                    "window.dispatchEvent(new CustomEvent('station-native-drag',{{detail:{{x:{x},y:{y}}}}}))"
+                ));
+                last_motion.set(Some(time));
+            }
+            true
+        });
+
+        let clear = window.clone();
+        view.connect_drag_leave(move |_, context, _| {
+            if external_files(context) {
+                let _ = clear.eval("window.dispatchEvent(new CustomEvent('station-native-drag'))");
+            }
+        });
+
+        let requested = pending.clone();
+        view.connect_drag_drop(move |view, context, x, y, time| {
+            if !external_files(context) { return false; }
+            requested.replace(Some((context.clone(), x, y)));
+            view.drag_get_data(context, &uri_list, time);
+            true
+        });
+
+        view.connect_drag_data_received(move |view, context, _, _, data, _, time| {
+            if data.target() != uri_list ||
+                !pending.borrow().as_ref().is_some_and(|(requested, _, _)| requested == context) {
+                return;
+            }
+            let (_, x, y) = pending.take().unwrap();
+            let paths: Vec<_> = data.uris().iter().filter_map(|uri| gio::File::for_uri(uri).path()).collect();
+            view.stop_signal_emission_by_name("drag-data-received");
+            context.drag_finish(!paths.is_empty(), false, time);
+            send_native_drop(&window, &paths, x.into(), y.into());
+        });
+    })
+}
+
+fn send_native_drop(target: &tauri::WebviewWindow, paths: &[PathBuf], x: f64, y: f64) {
+    let library = target.state::<Library>();
+    let links: Vec<_> = paths.iter().filter_map(|path| library.grant(path.clone()).ok()).collect();
+    let payload = serde_json::json!({"links": links, "x": x, "y": y});
+    let _ = target.eval(format!(
+        "window.dispatchEvent(new CustomEvent('station-native-drop',{{detail:{payload}}}))"
+    ));
 }
 
 pub fn main() {
@@ -248,14 +326,18 @@ pub fn main() {
     let bookmarks = data.join("MusicLinks");
     tauri::Builder::default()
         .manage(Library::open(bookmarks).expect("Could not open music links"))
-        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate,crate::dock::dock_command])
+        .invoke_handler(tauri::generate_handler![pick_sources,list_children,read_music,inspect_link,save_export,donate,open_releases,crate::dock::dock_command])
         .setup(move |app| {
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Station Pilot").inner_size(1280.0,850.0).min_inner_size(560.0,480.0)
-                .initialization_script("window.stationPilotUnix = true;")
+                .initialization_script(if cfg!(target_os = "linux") {
+                    "window.stationPilotUnix = true; window.stationPilotLinux = true;"
+                } else {
+                    "window.stationPilotUnix = true;"
+                })
                 .on_navigation(|url| url.scheme()=="tauri" && url.host_str()==Some("localhost"));
             #[cfg(target_os="linux")]
-            let builder = builder.data_directory(data.join("WebKit"));
+            let builder = builder.data_directory(data.join("WebKit")).disable_drag_drop_handler();
             #[cfg(target_os="macos")]
             let builder = builder.background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
             let window = builder.build()?;
@@ -268,16 +350,18 @@ pub fn main() {
                     let _ = app_handle.run_on_main_thread(move || crate::dock::show(&handle));
                 }
             });
-            let target = window.clone();
-            window.on_window_event(move |event| {
-                if let WindowEvent::DragDrop(DragDropEvent::Drop {paths,position,..}) = event {
-                    let library = target.state::<Library>();
-                    let links: Vec<_> = paths.iter().filter_map(|p| library.grant(p.clone()).ok()).collect();
-                    let scale = target.scale_factor().unwrap_or(1.0);
-                    let payload = serde_json::json!({"links":links,"x":position.x/scale,"y":position.y/scale});
-                    let _ = target.eval(format!("window.dispatchEvent(new CustomEvent('station-native-drop',{{detail:{payload}}}))"));
-                }
-            });
+            #[cfg(target_os = "linux")]
+            connect_linux_drop(window.clone())?;
+            #[cfg(target_os = "macos")]
+            {
+                let target = window.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position, .. }) = event {
+                        let scale = target.scale_factor().unwrap_or(1.0);
+                        send_native_drop(&target, paths, position.x / scale, position.y / scale);
+                    }
+                });
+            }
             Ok(())
         }).build(tauri::generate_context!()).expect("Station Pilot could not start")
         .run(|_app, _event| {

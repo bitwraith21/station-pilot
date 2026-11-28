@@ -166,6 +166,8 @@ tr:has(.selection-cell input:checked) td { background: #26413b; }
 [data-drop].drop-active { outline: 2px solid var(--lime); outline-offset: -2px; }
 .program.drop-active .platter, .standby.drop-active .platter { outline: 2px solid var(--lime); outline-offset: 3px; }
 tr[data-entry] .drag-name { cursor: grab; }
+.pointer-drag .drag-name { -webkit-user-select: none; user-select: none; }
+.pointer-drag .grip { touch-action: none; }
 tr[data-entry].dragging { opacity: .48; }
 tr[data-insert="before"] td { box-shadow: inset 0 2px var(--lime); }
 tr[data-insert="after"] td { box-shadow: inset 0 -2px var(--lime); }
