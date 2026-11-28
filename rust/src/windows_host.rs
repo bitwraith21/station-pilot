@@ -37,9 +37,15 @@ use windows::{
 
 const ORIGIN: &str = "http://127.0.0.1:8765/";
 #[cfg(not(feature = "offline"))]
+<<<<<<< HEAD
 const PRODUCT: &str = "{ADEE2188-244F-4027-A935-570093505063}";
 #[cfg(feature = "offline")]
 const PRODUCT: &str = "{D58C090E-DB85-4102-9989-2FD379031E3A}";
+=======
+const PRODUCT: &str = "{59352330-A9F0-40D0-ACDA-7E56A79DF9C2}";
+#[cfg(feature = "offline")]
+const PRODUCT: &str = "{450A00A2-E22F-4F08-8A65-CAF0955F1002}";
+>>>>>>> d496885d508d1420684bf6196a44d75f5c08eae0
 
 use crate::ASSETS;
 

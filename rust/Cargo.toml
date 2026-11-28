@@ -1,6 +1,10 @@
 [package]
 name = "station-pilot"
+<<<<<<< HEAD
 version = "0.4.9"
+=======
+version = "0.4.8"
+>>>>>>> d496885d508d1420684bf6196a44d75f5c08eae0
 edition = "2021"
 
 [build-dependencies]

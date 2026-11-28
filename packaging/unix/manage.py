@@ -71,8 +71,13 @@ def make_shortcuts(app, shortcuts):
                 "CFBundleDisplayName": "Station Pilot",
                 "CFBundleExecutable": "StationPilot",
                 "CFBundlePackageType": "APPL",
+<<<<<<< HEAD
                 "CFBundleVersion": "0.4.9",
                 "CFBundleShortVersionString": "0.4.9",
+=======
+                "CFBundleVersion": "0.4.8",
+                "CFBundleShortVersionString": "0.4.8",
+>>>>>>> d496885d508d1420684bf6196a44d75f5c08eae0
                 "CFBundleIconFile": "StationPilot.icns",
                 "LSUIElement": False,
             }, handle)

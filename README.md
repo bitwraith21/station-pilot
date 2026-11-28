@@ -30,6 +30,7 @@ sh install.sh
 
 The install and uninstall scripts use Python 3.9 or later. Playout uses the system WKWebView on macOS or WebKitGTK 4.1 with GStreamer audio codecs on Linux. On macOS, the app shortcut appears under `~/Applications`. On Linux, use the desktop environment's application menu.
 
+<<<<<<< HEAD
 ### Linux AppImage
 
 Download the Linux x64 AppImage from the release that provides it. Make it executable and open it from the file manager, or run it directly from a terminal. If your distribution cannot mount AppImages, run it with the `--appimage-extract-and-run` option.
@@ -42,6 +43,10 @@ sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1 libxdo3 gstreame
 
 ### Build and install from Git on macOS or Linux
 
+=======
+### Build and install from Git on macOS or Linux
+
+>>>>>>> d496885d508d1420684bf6196a44d75f5c08eae0
 From the cloned repository, run this as your desktop user.
 
 ```sh
